@@ -1,0 +1,6 @@
+{
+  "name": "MY ARC",
+  "description": "Dark cyberpunk gamified self-improvement system for tracking daily stats, habits, character growth, and motivational protocols.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

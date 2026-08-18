@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .theme-border-glow {
+    border-color: var(--theme-c1);
+    box-shadow: 0 0 15px var(--theme-glow1);
+  }
+
+  .theme-gradient-bg {
+    background: var(--theme-grad);
+  }
+
+  .theme-text-gradient {
+    background: var(--theme-grad);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
