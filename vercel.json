@@ -2,6 +2,6 @@
   "buildCommand": "cd arc-app && npm run build",
   "outputDirectory": "arc-app/dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
