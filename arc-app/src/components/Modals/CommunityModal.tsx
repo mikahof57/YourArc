@@ -41,7 +41,6 @@ import {
   INITIAL_LEADERBOARD,
   GLOBAL_COMMUNITY_PLAYERS,
   INITIAL_INCOMING_FRIEND_REQUESTS,
-  generateCharacterCode,
 } from '../../data/communityData';
 import {
   ClanShieldBadge,
@@ -49,6 +48,13 @@ import {
   PRESET_COLORS,
   POPULAR_IOS_EMOJIS,
 } from '../ClanShieldBadge';
+import {
+  loadClans, loadFriendRequests, loadFriends, respondToFriendRequest, removeFriend,
+  sendFriendRequestByCode, createClan as createClanBackend, requestClanJoin,
+  loadClanInvitations, respondToClanInvitation, sendClanInvitationByCode,
+  acceptClanJoin, declineClanJoin, setClanMemberRole, removeClanMember, leaveClan,
+  subscribeToCommunity,
+} from '../../services/communityService';
 
 interface CommunityModalProps {
   appState: AppState;
@@ -147,18 +153,50 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
   const [inviteMemberCode, setInviteMemberCode] = useState('');
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
 
-  // Ensure character code exists on user profile and persist it permanently
+  // Load real community state from Supabase whenever the modal opens.
   useEffect(() => {
-    if (!appState.profile.characterCode) {
-      const newCode = generateCharacterCode();
-      onUpdateAppState({
-        profile: {
-          ...appState.profile,
-          characterCode: newCode,
-        },
-      });
-    }
-  }, [appState.profile, onUpdateAppState]);
+    let active = true;
+    (async () => {
+      try {
+        const [profile, friends, requests, clans, invitations] = await Promise.all([
+          (await import('../../services/communityService')).getMyProfile(),
+          loadFriends(),
+          loadFriendRequests(),
+          loadClans(),
+          loadClanInvitations(),
+        ]);
+        if (!active) return;
+        if (profile) {
+          onUpdateAppState({
+            profile: { ...appState.profile, name: profile.name || appState.profile.name, avatarUrl: profile.avatar_url || appState.profile.avatarUrl, characterCode: profile.character_code },
+            credits: profile.credits ?? appState.credits ?? 100,
+            friends,
+            incomingFriendRequests: requests,
+            clans,
+            clanInvitations: invitations,
+            userClan: clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null,
+          });
+        }
+      } catch (error) {
+        console.error('Community backend load failed:', error);
+      }
+    })();
+    const realtime = subscribeToCommunity(async () => {
+      try {
+        const [friends, requests, clans, invitations] = await Promise.all([
+          loadFriends(), loadFriendRequests(), loadClans(), loadClanInvitations()
+        ]);
+        if (active) onUpdateAppState({
+          friends, incomingFriendRequests: requests, clans, clanInvitations: invitations,
+          userClan: clans.find((c) => c.members.some((m) => m.characterCode === characterCode)) || null,
+        });
+      } catch (error) {
+        console.error('Community realtime refresh failed:', error);
+      }
+    });
+    return () => { active = false; realtime.unsubscribe(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const characterCode = appState.profile.characterCode || 'CYBER-OPERATOR-01';
 
@@ -229,123 +267,71 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  // Send request from Leaderboard Plus Button
-  const handleSendRequestFromLeaderboard = (player: LeaderboardUser) => {
-    // Check 24-hour cooldown if previously declined
-    const declinedTimestamp = declinedRequestsInfo[player.id] || declinedRequestsInfo[player.characterCode];
-    if (declinedTimestamp && Date.now() - declinedTimestamp < 24 * 60 * 60 * 1000) {
-      const remainingHours = Math.max(1, Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - declinedTimestamp)) / (1000 * 60 * 60)));
-      setLeaderboardFeedback({
-        id: player.id,
-        text: lang === 'en'
-          ? `Request declined! Try again after 24 hrs (${remainingHours} hrs remaining) or connect instantly via character code!`
-          : `Anfrage abgelehnt! Erst nach 24 Std. (${remainingHours} Std. verbleibend) wieder möglich. Über den Spieler-Code geht es sofort!`,
-        isError: true,
-      });
-      setTimeout(() => setLeaderboardFeedback(null), 5000);
-      return;
+  // Send friend request from leaderboard (only real profiles can be requested).
+  const handleSendRequestFromLeaderboard = async (player: LeaderboardUser) => {
+    try {
+      await sendFriendRequestByCode(player.characterCode);
+      setLeaderboardFeedback({ id: player.id, text: lang === 'en' ? '✓ Friend request sent!' : '✓ Freundesanfrage gesendet!', isError: false });
+    } catch (error: any) {
+      const messages: Record<string, string> = {
+        SELF_REQUEST: lang === 'en' ? 'You cannot add yourself.' : 'Du kannst dich nicht selbst hinzufügen.',
+        ALREADY_FRIENDS: lang === 'en' ? 'This player is already your friend.' : 'Dieser Spieler ist bereits dein Freund.',
+        REQUEST_EXISTS: lang === 'en' ? 'A request is already pending.' : 'Eine Anfrage ist bereits offen.',
+        PLAYER_NOT_FOUND: lang === 'en' ? 'Player not found.' : 'Spieler nicht gefunden.',
+      };
+      setLeaderboardFeedback({ id: player.id, text: messages[error?.message] || (lang === 'en' ? 'Could not send request.' : 'Anfrage konnte nicht gesendet werden.'), isError: true });
     }
-
-    const updatedSentIds = [...sentRequestIds, player.id, player.characterCode];
-    onUpdateAppState({
-      sentFriendRequestIds: updatedSentIds,
-    });
-
-    setLeaderboardFeedback({
-      id: player.id,
-      text: lang === 'en' ? '✓ Friend request sent!' : '✓ Freundesanfrage gesendet!',
-      isError: false,
-    });
-    setTimeout(() => setLeaderboardFeedback(null), 3000);
+    setTimeout(() => setLeaderboardFeedback(null), 4000);
   };
 
-  // Add Friend Request via Character Code
-  const handleAddFriendByCode = () => {
+  // Add Friend Request via Character Code - now stored in Supabase.
+  const handleAddFriendByCode = async () => {
     if (!addFriendCode.trim()) return;
     const cleanCode = addFriendCode.trim().toUpperCase();
-
-    if (cleanCode === characterCode) {
-      setFriendFeedback(lang === 'en' ? 'You cannot send a friend request to yourself!' : 'Du kannst dir nicht selbst eine Anfrage senden!');
-      return;
+    try {
+      await sendFriendRequestByCode(cleanCode);
+      setAddFriendCode('');
+      setAddFriendName('');
+      setFriendFeedback(lang === 'en' ? '✓ Friend request sent! Waiting for approval.' : '✓ Freundesanfrage gesendet! Warte auf die Annahme.');
+      setTimeout(() => setFriendFeedback(null), 4000);
+    } catch (error: any) {
+      const messages: Record<string, string> = {
+        SELF_REQUEST: lang === 'en' ? 'You cannot send a request to yourself.' : 'Du kannst dir nicht selbst eine Anfrage senden.',
+        ALREADY_FRIENDS: lang === 'en' ? 'This player is already your friend.' : 'Dieser Spieler ist bereits dein Freund.',
+        REQUEST_EXISTS: lang === 'en' ? 'A request is already pending.' : 'Eine Anfrage ist bereits offen.',
+        PLAYER_NOT_FOUND: lang === 'en' ? 'No player found for this character code.' : 'Kein Spieler mit diesem Charakter-Code gefunden.',
+      };
+      setFriendFeedback(messages[error?.message] || (lang === 'en' ? 'Could not send request.' : 'Anfrage konnte nicht gesendet werden.'));
     }
+  };
 
-    if (friendsList.some((f) => f.characterCode.toUpperCase() === cleanCode)) {
-      setFriendFeedback(lang === 'en' ? 'This player is already on your friends list!' : 'Dieser Spieler ist bereits in deiner Freundesliste!');
-      return;
+  const handleAcceptRequest = async (req: FriendRequest) => {
+    try {
+      await respondToFriendRequest(req.id, true);
+      const [friends, requests] = await Promise.all([loadFriends(), loadFriendRequests()]);
+      onUpdateAppState({ friends, incomingFriendRequests: requests });
+    } catch (error) {
+      console.error('Accept friend request failed:', error);
     }
-
-    // Target player lookup or fallback
-    const targetPlayer = GLOBAL_COMMUNITY_PLAYERS.find((p) => p.characterCode.toUpperCase() === cleanCode);
-    const friendName = addFriendName.trim() || targetPlayer?.name || `Agent_${cleanCode.slice(-4)}`;
-
-    // Sending via player code always works (bypasses 24h restriction), but recipient must accept!
-    const newRequest: FriendRequest = {
-      id: `freq-${Date.now()}`,
-      fromUserId: targetPlayer?.id || `usr-${cleanCode}`,
-      fromUserName: friendName,
-      fromUserCode: cleanCode,
-      fromUserAvatar: targetPlayer?.avatarUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80',
-      fromUserLevel: targetPlayer?.level || 1,
-      fromUserPoints: targetPlayer?.standardPoints || 100,
-      sentAt: lang === 'en' ? 'Just now' : 'Gerade eben',
-      viaCode: true,
-    };
-
-    const updatedRequests = [newRequest, ...incomingRequests.filter((r) => r.fromUserCode !== cleanCode)];
-    onUpdateAppState({ incomingFriendRequests: updatedRequests });
-
-    setAddFriendCode('');
-    setAddFriendName('');
-    setFriendFeedback(
-      lang === 'en'
-        ? '✓ Friend request sent via code! Waiting for approval.'
-        : '✓ Freundesanfrage per Code gesendet! Liegt als Anforderung vor und muss angenommen werden.'
-    );
-    setTimeout(() => setFriendFeedback(null), 5000);
   };
 
-  // Accept Friend Request
-  const handleAcceptRequest = (req: FriendRequest) => {
-    const newFriend: FriendUser = {
-      id: req.fromUserId || `f-${Date.now()}`,
-      name: req.fromUserName,
-      characterCode: req.fromUserCode,
-      avatarUrl: req.fromUserAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80',
-      level: req.fromUserLevel || 1,
-      isOnline: true,
-      lastTaskCompletedText: lang === 'en' ? 'Last active: Recently joined' : 'Zuletzt aktiv: Kürzlich beigetreten',
-      statStreaks: { muskeln: 1, geist: 1 },
-      totalPoints: req.fromUserPoints || 100,
-    };
-
-    const updatedFriends = [...friendsList.filter((f) => f.characterCode !== req.fromUserCode), newFriend];
-    const updatedRequests = incomingRequests.filter((r) => r.id !== req.id);
-
-    onUpdateAppState({
-      friends: updatedFriends,
-      incomingFriendRequests: updatedRequests,
-    });
+  const handleDeclineRequest = async (req: FriendRequest) => {
+    try {
+      await respondToFriendRequest(req.id, false);
+      const requests = await loadFriendRequests();
+      onUpdateAppState({ incomingFriendRequests: requests });
+    } catch (error) {
+      console.error('Decline friend request failed:', error);
+    }
   };
 
-  // Decline Friend Request (sets 24-hour cooldown for direct requests)
-  const handleDeclineRequest = (req: FriendRequest) => {
-    const updatedRequests = incomingRequests.filter((r) => r.id !== req.id);
-    const updatedDeclinedInfo = {
-      ...declinedRequestsInfo,
-      [req.fromUserId]: Date.now(),
-      [req.fromUserCode]: Date.now(),
-    };
-
-    onUpdateAppState({
-      incomingFriendRequests: updatedRequests,
-      declinedRequestsInfo: updatedDeclinedInfo,
-    });
-  };
-
-  // Remove Friend
-  const handleRemoveFriend = (friendId: string) => {
-    const updatedFriends = friendsList.filter((f) => f.id !== friendId);
-    onUpdateAppState({ friends: updatedFriends });
+  const handleRemoveFriend = async (friendId: string) => {
+    try {
+      await removeFriend(friendId);
+      onUpdateAppState({ friends: await loadFriends() });
+    } catch (error) {
+      console.error('Remove friend failed:', error);
+    }
   };
 
   // Clan action feedback
@@ -366,44 +352,26 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
   const clanInvitations = appState.clanInvitations || [];
   const sentClanJoinRequestIds = appState.sentClanJoinRequestIds || [];
 
-  // Create Clan
-  const handleCreateClan = () => {
+  // Create Clan - persisted in Supabase.
+  const handleCreateClan = async () => {
     if (!newClanName.trim() || !newClanTag.trim()) return;
-
-    const newClanObj: ClanData = {
-      id: `clan-${Date.now()}`,
-      name: newClanName.trim(),
-      tag: newClanTag.trim().toUpperCase(),
-      leaderCode: characterCode,
-      description: newClanDesc.trim() || 'Neuer Cyber Clan',
-      badgeEmoji: newClanEmoji.trim() || '🛡️',
-      badgeConfig: {
-        shapeId: badgeShapeId,
-        colors: badgeColors.length > 0 ? badgeColors : ['#00f0ff'],
-        emoji: newClanEmoji.trim() || '🛡️',
-      },
-      clanPoints: 0,
-      members: [
-        {
-          id: 'user-self-member',
-          name: appState.profile.name || 'OPERATOR',
-          characterCode: characterCode,
-          avatarUrl: appState.profile.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80',
-          role: 'leader',
-          isOnline: true,
-          level: totalLvl,
-          joinedAt: new Date().toISOString().split('T')[0],
-        },
-      ],
-      joinRequests: [],
-    };
-
-    const updatedClans = [...allClans, newClanObj];
-    onUpdateAppState({ userClan: newClanObj, clans: updatedClans });
-    setIsCreatingClan(false);
-    setNewClanName('');
-    setNewClanTag('');
-    setNewClanDesc('');
+    try {
+      await createClanBackend({
+        name: newClanName.trim(),
+        tag: newClanTag.trim().toUpperCase(),
+        description: newClanDesc.trim() || 'Neuer Cyber Clan',
+        badgeEmoji: newClanEmoji.trim() || '🛡️',
+        badgeConfig: { shapeId: badgeShapeId, colors: badgeColors.length ? badgeColors : ['#00f0ff'], emoji: newClanEmoji.trim() || '🛡️' },
+      });
+      const clans = await loadClans();
+      const profile = await (await import('../../services/communityService')).getMyProfile();
+      onUpdateAppState({ clans, userClan: profile ? clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null : null });
+      setIsCreatingClan(false);
+      setNewClanName(''); setNewClanTag(''); setNewClanDesc('');
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not create clan.' : 'Clan konnte nicht erstellt werden.'), isError: true });
+      setTimeout(() => setClanFeedback(null), 4000);
+    }
   };
 
   // Toggle badge colors (1 to 3 simultaneously)
@@ -421,394 +389,184 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
     }
   };
 
-  // Request to Join Clan (Beitritts-Anfrage)
-  const handleRequestJoinClan = (clan: ClanData) => {
-    if (userClan) {
-      setClanFeedback({
-        text: lang === 'en' ? 'You are already in a clan! Leave your current clan first.' : 'Du bist bereits in einem Clan! Verlasse erst deinen aktuellen Clan.',
-        isError: true,
-      });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
+  // Request to Join Clan - persisted in Supabase.
+  const handleRequestJoinClan = async (clan: ClanData) => {
+    if (userClan) { setClanFeedback({ text: lang === 'en' ? 'You are already in a clan.' : 'Du bist bereits in einem Clan.', isError: true }); return; }
+    if (clan.members.length >= 30) { setClanFeedback({ text: lang === 'en' ? 'This clan is full.' : 'Dieser Clan ist voll.', isError: true }); return; }
+    try {
+      await requestClanJoin(clan.id);
+      setClanFeedback({ text: lang === 'en' ? '✓ Join request sent!' : '✓ Beitrittsanfrage gesendet!', isError: false });
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not send join request.' : 'Beitrittsanfrage konnte nicht gesendet werden.'), isError: true });
     }
-    if (clan.members.length >= 30) {
-      setClanFeedback({
-        text: lang === 'en' ? 'This clan is full! (Maximum 30 members)' : 'Dieser Clan ist voll! (Maximal 30 Mitglieder)',
-        isError: true,
-      });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
-    }
-
-    const existingRequests = clan.joinRequests || [];
-    if (existingRequests.some((r) => r.userCode === characterCode)) {
-      setClanFeedback({
-        text: lang === 'en' ? 'Your join request for this clan is already pending!' : 'Deine Beitrittsanfrage für diesen Clan ist bereits ausstehend!',
-        isError: true,
-      });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
-    }
-
-    const newRequest: ClanJoinRequest = {
-      id: `cjr-${Date.now()}`,
-      clanId: clan.id,
-      userId: `usr-${characterCode}`,
-      userName: appState.profile.name || 'OPERATOR',
-      userCode: characterCode,
-      userAvatar: appState.profile.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80',
-      userLevel: totalLvl,
-      userPoints: userStandardPoints,
-      sentAt: lang === 'en' ? 'Just now' : 'Gerade eben',
-    };
-
-    const updatedClan: ClanData = {
-      ...clan,
-      joinRequests: [...existingRequests, newRequest],
-    };
-
-    const updatedClans = allClans.map((c) => (c.id === clan.id ? updatedClan : c));
-    const updatedSentRequestIds = Array.from(new Set([...sentClanJoinRequestIds, clan.id]));
-
-    onUpdateAppState({
-      clans: updatedClans,
-      sentClanJoinRequestIds: updatedSentRequestIds,
-    });
-
-    setClanFeedback({
-      text: lang === 'en' ? '✓ Join request sent! Waiting for founder/admin approval.' : '✓ Beitrittsanfrage gesendet! Warten auf Freigabe durch den Gründer/Admin.',
-      isError: false,
-    });
     setTimeout(() => setClanFeedback(null), 4000);
   };
 
-  // Accept Join Request
-  const handleAcceptJoinRequest = (req: ClanJoinRequest) => {
+  // Accept Join Request - server-authoritative.
+  const handleAcceptJoinRequest = async (req: ClanJoinRequest) => {
     if (!userClan) return;
-    if (userClan.members.length >= 30) {
-      setClanFeedback({
-        text: lang === 'en' ? 'Clan full! (Maximum 30 members)' : 'Clan voll! (Maximal 30 Mitglieder)',
-        isError: true,
+    try {
+      await acceptClanJoin(req.id);
+      const clans = await loadClans();
+      onUpdateAppState({
+        clans,
+        userClan: clans.find((c) => c.id === userClan.id) || null,
       });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
+      setClanFeedback({
+        text: lang === 'en' ? `✓ ${req.userName} was added to the clan!` : `✓ ${req.userName} wurde in den Clan aufgenommen!`,
+        isError: false,
+      });
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not accept request.' : 'Anfrage konnte nicht angenommen werden.'), isError: true });
     }
-
-    const newMember: ClanMember = {
-      id: `m-${Date.now()}`,
-      name: req.userName,
-      characterCode: req.userCode,
-      avatarUrl: req.userAvatar,
-      role: 'member',
-      isOnline: true,
-      level: req.userLevel,
-      joinedAt: new Date().toISOString().split('T')[0],
-    };
-
-    const updatedRequests = (userClan.joinRequests || []).filter((r) => r.id !== req.id);
-    const updatedMembers = [...userClan.members, newMember];
-
-    const updatedClan: ClanData = {
-      ...userClan,
-      members: updatedMembers,
-      joinRequests: updatedRequests,
-    };
-
-    const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-    onUpdateAppState({
-      userClan: updatedClan,
-      clans: updatedClans,
-    });
-
-    setClanFeedback({
-      text: lang === 'en' ? `✓ ${req.userName} was added to the clan!` : `✓ ${req.userName} wurde in den Clan aufgenommen!`,
-      isError: false,
-    });
     setTimeout(() => setClanFeedback(null), 4000);
   };
 
-  // Decline Join Request
-  const handleDeclineJoinRequest = (reqId: string) => {
-    if (!userClan) return;
-    const updatedRequests = (userClan.joinRequests || []).filter((r) => r.id !== reqId);
-    const updatedClan: ClanData = {
-      ...userClan,
-      joinRequests: updatedRequests,
-    };
-
-    const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-    onUpdateAppState({
-      userClan: updatedClan,
-      clans: updatedClans,
-    });
+  // Decline Join Request - server-authoritative.
+  const handleDeclineJoinRequest = async (reqId: string) => {
+    try {
+      await declineClanJoin(reqId);
+      const clans = await loadClans();
+      onUpdateAppState({
+        clans,
+        userClan: userClan ? clans.find((c) => c.id === userClan.id) || null : null,
+      });
+    } catch (error) {
+      console.error('Decline clan request failed:', error);
+    }
   };
 
-  // Send Clan Invitation
-  const handleSendClanInvitation = () => {
+  // Send Clan Invitation - server-authoritative.
+  const handleSendClanInvitation = async () => {
     if (!inviteMemberCode.trim() || !userClan) return;
     if (userClan.members.length >= 30) {
       setInviteFeedback(lang === 'en' ? 'Clan full! Maximum 30 members reached.' : 'Clan voll! Maximum 30 Mitglieder erreicht.');
       return;
     }
-
-    const cleanCode = inviteMemberCode.trim().toUpperCase();
-    if (userClan.members.some((m) => m.characterCode === cleanCode)) {
-      setInviteFeedback(lang === 'en' ? 'Player is already a member of this clan!' : 'Spieler ist bereits Mitglied im Clan!');
-      return;
+    try {
+      await sendClanInvitationByCode(userClan.id, inviteMemberCode.trim());
+      const invitations = await loadClanInvitations();
+      onUpdateAppState({ clanInvitations: invitations });
+      setInviteMemberCode('');
+      setInviteFeedback(lang === 'en' ? '✓ Clan invitation sent!' : '✓ Clan-Einladung gesendet!');
+    } catch (error: any) {
+      const map: Record<string,string> = {
+        PLAYER_NOT_FOUND: lang === 'en' ? 'Player not found.' : 'Spieler nicht gefunden.',
+        already_member: lang === 'en' ? 'Player is already a member.' : 'Spieler ist bereits Mitglied.',
+        invitation_exists: lang === 'en' ? 'An invitation is already pending.' : 'Eine Einladung ist bereits offen.',
+        not_authorized: lang === 'en' ? 'You are not allowed to invite members.' : 'Du darfst keine Mitglieder einladen.',
+      };
+      setInviteFeedback(map[error?.message] || (error?.message || (lang === 'en' ? 'Invitation failed.' : 'Einladung fehlgeschlagen.')));
     }
-
-    const invitation: ClanInvitation = {
-      id: `cinv-${Date.now()}`,
-      clanId: userClan.id,
-      clanName: userClan.name,
-      clanTag: userClan.tag,
-      clanBadgeEmoji: userClan.badgeEmoji,
-      clanBadgeConfig: userClan.badgeConfig,
-      fromUserName: appState.profile.name || 'OPERATOR',
-      sentAt: lang === 'en' ? 'Just now' : 'Gerade eben',
-    };
-
-    const updatedInvitations = [...clanInvitations, invitation];
-    onUpdateAppState({
-      clanInvitations: updatedInvitations,
-    });
-
-    setInviteMemberCode('');
-    setInviteFeedback(lang === 'en' ? `✓ Clan invitation sent to ${cleanCode}!` : `✓ Clan-Einladung an ${cleanCode} wurde gesendet!`);
     setTimeout(() => setInviteFeedback(null), 4000);
   };
 
-  // Accept Incoming Clan Invitation
-  const handleAcceptClanInvitation = (inv: ClanInvitation) => {
-    if (userClan) {
-      alert(lang === 'en' ? 'You are already in a clan! Leave your current clan first.' : 'Du bist bereits in einem Clan! Verlasse erst deinen aktuellen Clan.');
-      return;
-    }
-
-    const targetClan = allClans.find((c) => c.id === inv.clanId);
-    if (!targetClan) {
-      alert(lang === 'en' ? 'This clan no longer exists.' : 'Dieser Clan existiert leider nicht mehr.');
+  // Accept Incoming Clan Invitation - server-authoritative.
+  const handleAcceptClanInvitation = async (inv: ClanInvitation) => {
+    try {
+      await respondToClanInvitation(inv.id, true);
+      const [clans, invitations] = await Promise.all([loadClans(), loadClanInvitations()]);
+      const profile = await (await import('../../services/communityService')).getMyProfile();
       onUpdateAppState({
-        clanInvitations: clanInvitations.filter((i) => i.id !== inv.id),
+        clans,
+        clanInvitations: invitations,
+        userClan: profile ? clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null : null,
       });
-      return;
+    } catch (error: any) {
+      alert(error?.message || (lang === 'en' ? 'Could not accept invitation.' : 'Einladung konnte nicht angenommen werden.'));
     }
+  };
 
-    if (targetClan.members.length >= 30) {
-      alert(lang === 'en' ? 'The clan is unfortunately full (30/30 members).' : 'Der Clan ist inzwischen leider voll (30/30 Mitglieder).');
-      return;
+  const handleDeclineClanInvitation = async (invId: string) => {
+    try {
+      await respondToClanInvitation(invId, false);
+      onUpdateAppState({ clanInvitations: await loadClanInvitations() });
+    } catch (error) {
+      console.error('Decline clan invitation failed:', error);
     }
-
-    const newMember: ClanMember = {
-      id: `m-${Date.now()}`,
-      name: appState.profile.name || 'OPERATOR',
-      characterCode: characterCode,
-      avatarUrl: appState.profile.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80',
-      role: 'member',
-      isOnline: true,
-      level: totalLvl,
-      joinedAt: new Date().toISOString().split('T')[0],
-    };
-
-    const updatedClan: ClanData = {
-      ...targetClan,
-      members: [...targetClan.members, newMember],
-    };
-
-    const updatedClans = allClans.map((c) => (c.id === targetClan.id ? updatedClan : c));
-    const updatedInvitations = clanInvitations.filter((i) => i.id !== inv.id);
-
-    onUpdateAppState({
-      userClan: updatedClan,
-      clans: updatedClans,
-      clanInvitations: updatedInvitations,
-    });
   };
 
-  // Decline Incoming Clan Invitation
-  const handleDeclineClanInvitation = (invId: string) => {
-    const updatedInvitations = clanInvitations.filter((i) => i.id !== invId);
-    onUpdateAppState({
-      clanInvitations: updatedInvitations,
-    });
-  };
-
-  // Promote Member to Admin (Gründer only)
-  const handlePromoteToAdmin = (member: ClanMember) => {
+  // Promote / demote members - server-authoritative.
+  const handlePromoteToAdmin = async (member: ClanMember) => {
     if (!userClan || !isUserClanFounder) return;
-
-    const updatedMembers = userClan.members.map((m) =>
-      m.characterCode === member.characterCode ? { ...m, role: 'officer' as const } : m
-    );
-
-    const updatedClan = { ...userClan, members: updatedMembers };
-    const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-    onUpdateAppState({ userClan: updatedClan, clans: updatedClans });
-    setClanFeedback({
-      text: lang === 'en' ? `✓ ${member.name} was promoted to Admin!` : `✓ ${member.name} wurde zum Admin ernannt!`,
-      isError: false,
-    });
-    setTimeout(() => setClanFeedback(null), 4000);
+    try {
+      await setClanMemberRole(userClan.id, member.id, 'officer');
+      const clans = await loadClans();
+      onUpdateAppState({ clans, userClan: clans.find((c) => c.id === userClan.id) || null });
+    } catch (error) {
+      console.error('Promote member failed:', error);
+    }
   };
 
-  // Demote Admin to Member (Gründer only)
-  const handleDemoteAdmin = (member: ClanMember) => {
+  const handleDemoteAdmin = async (member: ClanMember) => {
     if (!userClan || !isUserClanFounder) return;
-
-    const updatedMembers = userClan.members.map((m) =>
-      m.characterCode === member.characterCode ? { ...m, role: 'member' as const } : m
-    );
-
-    const updatedClan = { ...userClan, members: updatedMembers };
-    const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-    onUpdateAppState({ userClan: updatedClan, clans: updatedClans });
-    setClanFeedback({
-      text: lang === 'en' ? `✓ Admin privileges revoked from ${member.name}.` : `✓ Admin-Rechte von ${member.name} wurden widerrufen.`,
-      isError: false,
-    });
-    setTimeout(() => setClanFeedback(null), 4000);
+    try {
+      await setClanMemberRole(userClan.id, member.id, 'member');
+      const clans = await loadClans();
+      onUpdateAppState({ clans, userClan: clans.find((c) => c.id === userClan.id) || null });
+    } catch (error) {
+      console.error('Demote member failed:', error);
+    }
   };
 
-  // Kick / Remove Member (Gründer or Admin)
-  const handleKickMember = (memberToKick: ClanMember) => {
+  // Kick / Remove Member - server-authoritative.
+  const handleKickMember = async (memberToKick: ClanMember) => {
     if (!userClan) return;
-
     if (memberToKick.characterCode === characterCode) {
-      handleInitiateLeaveClan();
+      await handleInitiateLeaveClan();
       return;
     }
-
-    if (memberToKick.role === 'leader' || userClan.leaderCode === memberToKick.characterCode) {
-      setClanFeedback({
-        text: lang === 'en' ? 'The clan founder cannot be removed from the clan!' : 'Der Clan-Gründer kann nicht aus dem Clan entfernt werden!',
-        isError: true,
-      });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
-    }
-
-    if (!isUserClanFounder && memberToKick.role === 'officer') {
-      setClanFeedback({
-        text: lang === 'en' ? 'Admins cannot kick other admins or the founder!' : 'Admins können keine anderen Admins oder den Gründer kicken!',
-        isError: true,
-      });
-      setTimeout(() => setClanFeedback(null), 4000);
-      return;
-    }
-
-    const updatedMembers = userClan.members.filter((m) => m.characterCode !== memberToKick.characterCode);
-
-    if (updatedMembers.length === 0) {
-      // Clan has 0 players remaining -> delete automatically!
-      const updatedClans = allClans.filter((c) => c.id !== userClan.id);
-      onUpdateAppState({
-        userClan: null,
-        clans: updatedClans,
-      });
-      setClanFeedback({
-        text: lang === 'en' ? 'The clan had no remaining members and was automatically deleted.' : 'Der Clan besaß keine weiteren Mitglieder und wurde automatisch gelöscht.',
-        isError: false,
-      });
-    } else {
-      const updatedClan: ClanData = {
-        ...userClan,
-        members: updatedMembers,
-      };
-
-      const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-      onUpdateAppState({
-        userClan: updatedClan,
-        clans: updatedClans,
-      });
-
-      setClanFeedback({
-        text: lang === 'en' ? `✓ ${memberToKick.name} was removed from the clan.` : `✓ ${memberToKick.name} wurde aus dem Clan entfernt.`,
-        isError: false,
-      });
+    try {
+      await removeClanMember(userClan.id, memberToKick.id);
+      const clans = await loadClans();
+      onUpdateAppState({ clans, userClan: clans.find((c) => c.id === userClan.id) || null });
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not remove member.' : 'Mitglied konnte nicht entfernt werden.'), isError: true });
       setTimeout(() => setClanFeedback(null), 4000);
     }
   };
 
-  // Leave Clan Handler
-  const handleInitiateLeaveClan = () => {
+  // Leave Clan - server-authoritative.
+  const handleInitiateLeaveClan = async () => {
     if (!userClan) return;
-
     const otherMembers = userClan.members.filter((m) => m.characterCode !== characterCode);
-
-    // Sole member leaving -> deletes clan automatically
-    if (otherMembers.length === 0) {
-      const updatedClans = allClans.filter((c) => c.id !== userClan.id);
-      onUpdateAppState({
-        userClan: null,
-        clans: updatedClans,
-      });
-      setClanFeedback({
-        text: lang === 'en' ? 'You left the clan. The clan had no remaining members and was deleted.' : 'Du hast den Clan verlassen. Der Clan besaß keine weiteren Mitglieder und wurde gelöscht.',
-        isError: false,
-      });
+    if (isUserClanFounder && otherMembers.length > 0) {
+      setShowLeaveSuccessorModal(true);
+      setSelectedSuccessorCode(otherMembers[0].characterCode);
       return;
     }
-
-    // Regular member or Admin leaving
-    if (!isUserClanFounder) {
-      const updatedClan = { ...userClan, members: otherMembers };
-      const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-      onUpdateAppState({
-        userClan: null,
-        clans: updatedClans,
-      });
+    try {
+      await leaveClan(userClan.id);
+      const clans = await loadClans();
+      onUpdateAppState({ clans, userClan: null });
       setClanFeedback({
         text: lang === 'en' ? 'You have successfully left the clan.' : 'Du hast den Clan erfolgreich verlassen.',
         isError: false,
       });
-      return;
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not leave clan.' : 'Clan konnte nicht verlassen werden.'), isError: true });
     }
-
-    // Founder leaving with remaining members -> must specify successor!
-    setShowLeaveSuccessorModal(true);
-    setSelectedSuccessorCode(otherMembers[0].characterCode);
+    setTimeout(() => setClanFeedback(null), 4000);
   };
 
-  // Confirm Founder Leaving after selecting successor
-  const handleConfirmFounderLeave = () => {
+  // Confirm Founder Leaving after selecting successor.
+  const handleConfirmFounderLeave = async () => {
     if (!userClan || !selectedSuccessorCode) return;
-
-    const otherMembers = userClan.members.filter((m) => m.characterCode !== characterCode);
-    const successor = otherMembers.find((m) => m.characterCode === selectedSuccessorCode);
-
-    if (!successor) {
-      alert(lang === 'en' ? 'Please select a valid successor.' : 'Bitte wähle einen gültigen Nachfolger aus.');
-      return;
+    const successor = userClan.members.find((m) => m.characterCode === selectedSuccessorCode);
+    if (!successor) return;
+    try {
+      await leaveClan(userClan.id, successor.id);
+      const clans = await loadClans();
+      onUpdateAppState({ clans, userClan: null });
+      setShowLeaveSuccessorModal(false);
+      setClanFeedback({
+        text: lang === 'en' ? `You left the clan. ${successor.name} is now the new clan founder!` : `Du hast den Clan verlassen. ${successor.name} ist nun der neue Clan-Gründer!`,
+        isError: false,
+      });
+    } catch (error: any) {
+      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not leave clan.' : 'Clan konnte nicht verlassen werden.'), isError: true });
     }
-
-    // Promote successor to leader
-    const updatedMembers = otherMembers.map((m) =>
-      m.characterCode === selectedSuccessorCode ? { ...m, role: 'leader' as const } : m
-    );
-
-    const updatedClan: ClanData = {
-      ...userClan,
-      leaderCode: selectedSuccessorCode,
-      members: updatedMembers,
-    };
-
-    const updatedClans = allClans.map((c) => (c.id === userClan.id ? updatedClan : c));
-
-    onUpdateAppState({
-      userClan: null,
-      clans: updatedClans,
-    });
-
-    setShowLeaveSuccessorModal(false);
-    setClanFeedback({
-      text: lang === 'en' ? `You left the clan. ${successor.name} is now the new clan founder!` : `Du hast den Clan verlassen. ${successor.name} ist nun der neue Clan-Gründer!`,
-      isError: false,
-    });
+    setTimeout(() => setClanFeedback(null), 4000);
   };
 
   return (

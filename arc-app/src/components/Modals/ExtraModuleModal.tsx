@@ -15,7 +15,7 @@ interface ExtraModuleModalProps {
   reloadsCountToday: number;
   seenModuleItemIds: Record<string, string[]>;
   currentCredits?: number;
-  onPerformReload: (moduleId: string, newSeenIds: string[]) => boolean;
+  onPerformReload: (moduleId: string, newSeenIds: string[]) => boolean | Promise<boolean>;
   onOpenShop?: () => void;
 }
 
@@ -99,9 +99,9 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
     // Pick 3 new non-duplicate items
     const { items, updatedSeenIds } = getFreshModuleItems(moduleConfig.id, currentSeenIds, 3);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       // Execute reload (deducts 1 credit and updates seen IDs)
-      const success = onPerformReload(moduleConfig.id, updatedSeenIds);
+      const success = await onPerformReload(moduleConfig.id, updatedSeenIds);
 
       if (success) {
         setCurrentItems(items);

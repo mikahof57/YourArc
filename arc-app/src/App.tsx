@@ -39,6 +39,19 @@ import { BackgroundAnimations } from './components/Effects/BackgroundAnimations'
 import { UserCheck, Shield, X, Loader2 } from 'lucide-react';
 import { InterfaceColorOption, UIAnimationOption } from './data/shopData';
 import { useStore } from './store/useStore';
+import {
+  getMyProfile,
+  loadFriends,
+  loadFriendRequests,
+  loadClans,
+  loadClanInvitations,
+  loadOwnedInventory,
+  purchaseStoreItem,
+  claimDailyWheel,
+  setOnlineStatus,
+  spendCredits,
+} from './services/communityService';
+import { startCreditCheckout } from './services/paymentService';
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>(() => loadAppState());
@@ -58,7 +71,69 @@ export default function App() {
   useEffect(() => {
     if (user) {
       setShowRegisterScreen(false);
+      (async () => {
+        try {
+          const [profile, friends, requests, clans, invitations, inventory] = await Promise.all([getMyProfile(), loadFriends(), loadFriendRequests(), loadClans(), loadClanInvitations(), loadOwnedInventory()]);
+          if (profile) {
+            setAppState((prev) => ({
+              ...prev,
+              profile: { ...prev.profile, name: profile.name || prev.profile.name, avatarUrl: profile.avatar_url || prev.profile.avatarUrl, characterCode: profile.character_code, isCreated: true },
+              credits: profile.credits ?? prev.credits ?? 100,
+              friends,
+              incomingFriendRequests: requests,
+              clans,
+              clanInvitations: invitations,
+              ownedSkinIds: inventory.filter((i: any) => i.item_type === 'skin').map((i: any) => i.item_id),
+              unlockedDesignColors: ['#06b6d4', ...inventory.filter((i: any) => i.item_type === 'color').map((i: any) => {
+                const colorMap: Record<string,string> = {
+                  color_amber:'#f59e0b', color_emerald:'#10b981', color_purple:'#a855f7',
+                  color_rose:'#f43f5e', color_blue:'#3b82f6', color_silver:'#e2e8f0', color_orange:'#f97316'
+                };
+                return colorMap[i.item_id];
+              }).filter(Boolean)],
+              purchasedAnimationIds: inventory.filter((i: any) => i.item_type === 'animation').map((i: any) => i.item_id),
+              hasUnlockedDesignCustomizer: inventory.some((i: any) => i.item_id === 'design_customizer'),
+              userClan: clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null,
+            }));
+          }
+        } catch (error) {
+          console.error('Failed to hydrate ARC backend state:', error);
+        }
+      })();
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    setOnlineStatus(true).catch((error) => console.error('Could not set online status:', error));
+    const markOffline = () => {
+      // Best effort on tab close; normal reconnects set the state back to online.
+      setOnlineStatus(false).catch(() => undefined);
+    };
+    window.addEventListener('beforeunload', markOffline);
+    return () => {
+      window.removeEventListener('beforeunload', markOffline);
+      setOnlineStatus(false).catch(() => undefined);
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') return;
+    const payment = new URLSearchParams(window.location.search).get('payment');
+    if (payment !== 'success') return;
+    const refreshCredits = async () => {
+      try {
+        // Stripe webhook is authoritative; refresh after a short delay to allow the webhook to settle.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const profile = await getMyProfile();
+        if (profile) setAppState((prev) => ({ ...prev, credits: profile.credits ?? prev.credits ?? 100 }));
+      } catch (error) {
+        console.error('Could not refresh credits after payment:', error);
+      } finally {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    };
+    refreshCredits();
   }, [user]);
 
   const handleSetLanguage = (newLang: Language) => {
@@ -80,96 +155,73 @@ export default function App() {
   const [isDeletedTasksOpen, setIsDeletedTasksOpen] = useState<boolean>(false);
   const [shopInitialTab, setShopInitialTab] = useState<'wheel' | 'exchange' | 'marketplace' | 'design' | 'animations'>('marketplace');
 
-  // Design Customizer & Animations Handlers
-  const handleUnlockDesignCustomizer = () => {
-    playSoundEffect('levelup');
-    let success = false;
-    setAppState((prev) => {
-      const credits = prev.credits || 100;
-      if (credits < 100) return prev;
-      success = true;
-      return {
-        ...prev,
-        credits: credits - 100,
-        hasUnlockedDesignCustomizer: true,
-      };
-    });
-    return success;
+  // Server-authoritative shop handlers. The browser only requests an item purchase;
+  // Supabase decides the price, checks the balance, and records the transaction.
+  const handleUnlockDesignCustomizer = async () => {
+    try {
+      const newBalance = await purchaseStoreItem('design_customizer');
+      playSoundEffect('levelup');
+      setAppState((prev) => ({ ...prev, credits: newBalance, hasUnlockedDesignCustomizer: true }));
+      return true;
+    } catch (error) {
+      console.error('Design customizer purchase failed:', error);
+      return false;
+    }
   };
 
   const handleToggleDesignColor = (colorHex: string) => {
     playSoundEffect('click');
     setAppState((prev) => {
-      if (colorHex === 'RESET_STANDARD') {
-        return { ...prev, selectedDesignColors: ['#06b6d4'] };
-      }
+      if (colorHex === 'RESET_STANDARD') return { ...prev, selectedDesignColors: ['#06b6d4'] };
       const current = prev.selectedDesignColors || [];
       let updated: string[];
       if (current.includes(colorHex)) {
         updated = current.filter((c) => c !== colorHex);
-        if (updated.length === 0) {
-          updated = ['#06b6d4']; // Reset to standard cyan if all deselected
-        }
+        if (updated.length === 0) updated = ['#06b6d4'];
       } else {
-        if (current.length >= 3) {
-          updated = [...current.slice(1), colorHex]; // Replace oldest selected color
-        } else {
-          updated = [...current, colorHex];
-        }
+        updated = current.length >= 3 ? [...current.slice(1), colorHex] : [...current, colorHex];
       }
       return { ...prev, selectedDesignColors: updated };
     });
   };
 
-  const handleBuyColor = (color: InterfaceColorOption) => {
-    playSoundEffect('levelup');
-    let success = false;
-    setAppState((prev) => {
-      const credits = prev.credits || 100;
-      if (credits < color.price) return prev;
-      success = true;
-      const unlocked = [...(prev.unlockedDesignColors || ['#f59e0b']), color.hex];
-      const currentSelected = prev.selectedDesignColors || [];
-      let selected: string[];
-      if (currentSelected.length < 3) {
-        selected = [...currentSelected, color.hex];
-      } else {
-        selected = [...currentSelected.slice(1), color.hex];
-      }
-      return {
+  const handleBuyColor = async (color: InterfaceColorOption) => {
+    try {
+      const newBalance = await purchaseStoreItem(color.id);
+      playSoundEffect('levelup');
+      setAppState((prev) => ({
         ...prev,
-        credits: credits - color.price,
-        unlockedDesignColors: unlocked,
-        selectedDesignColors: selected,
-      };
-    });
-    return success;
+        credits: newBalance,
+        unlockedDesignColors: [...new Set([...(prev.unlockedDesignColors || ['#06b6d4']), color.hex])],
+        selectedDesignColors: [...new Set([...(prev.selectedDesignColors || ['#06b6d4']), color.hex])].slice(-3),
+      }));
+      return true;
+    } catch (error) {
+      console.error('Color purchase failed:', error);
+      return false;
+    }
   };
 
-  const handleBuyAnimation = (anim: UIAnimationOption) => {
-    playSoundEffect('levelup');
-    let success = false;
-    setAppState((prev) => {
-      const credits = prev.credits || 100;
-      if (credits < anim.price) return prev;
-      success = true;
-      const purchased = [...(prev.purchasedAnimationIds || []), anim.id];
-      return {
+  const handleBuyAnimation = async (anim: UIAnimationOption) => {
+    try {
+      const newBalance = await purchaseStoreItem(anim.id);
+      playSoundEffect('levelup');
+      setAppState((prev) => ({
         ...prev,
-        credits: credits - anim.price,
-        purchasedAnimationIds: purchased,
+        credits: newBalance,
+        purchasedAnimationIds: [...new Set([...(prev.purchasedAnimationIds || []), anim.id])],
         equippedAnimationId: anim.id,
-      };
-    });
-    return success;
+      }));
+      return true;
+    } catch (error) {
+      console.error('Animation purchase failed:', error);
+      return false;
+    }
   };
 
   const handleEquipAnimation = (animId: string) => {
     playSoundEffect('click');
-    setAppState((prev) => ({
-      ...prev,
-      equippedAnimationId: prev.equippedAnimationId === animId ? '' : animId,
-    }));
+    setAppState((prev) => ({ ...prev, equippedAnimationId: prev.equippedAnimationId === animId ? '' : animId }));
   };
 
   // Task Restoration Handler
@@ -607,23 +659,23 @@ export default function App() {
           reloadsCountToday={appState.moduleReloadsCountToday || 0}
           seenModuleItemIds={appState.seenModuleItemIds || {}}
           currentCredits={appState.credits || 100}
-          onPerformReload={(moduleId, newSeenIds) => {
+          onPerformReload={async (moduleId, newSeenIds) => {
             playSoundEffect('click');
-            let success = false;
-            setAppState((prev) => {
-              const currentCredits = prev.credits || 100;
-              if (currentCredits < 1) return prev;
-              success = true;
-              return {
+            try {
+              const newBalance = await spendCredits(1, 'module_reload', moduleId, { module_id: moduleId });
+              setAppState((prev) => ({
                 ...prev,
-                credits: currentCredits - 1,
+                credits: newBalance,
                 seenModuleItemIds: {
                   ...(prev.seenModuleItemIds || {}),
                   [moduleId]: newSeenIds,
                 },
-              };
-            });
-            return success;
+              }));
+              return true;
+            } catch (error) {
+              console.error('Module reload credit charge failed:', error);
+              return false;
+            }
           }}
           onOpenShop={() => {
             setActiveExtraModule(null);
@@ -657,37 +709,31 @@ export default function App() {
           purchasedAnimationIds={appState.purchasedAnimationIds || []}
           equippedAnimationId={appState.equippedAnimationId || ''}
           initialTab={shopInitialTab}
-          onAddCredits={(amount) => {
-            playSoundEffect('levelup');
-            setAppState((prev) => ({
-              ...prev,
-              credits: (prev.credits || 100) + amount,
-            }));
+          onAddCredits={async (amount) => {
+            playSoundEffect('click');
+            await startCreditCheckout(amount);
           }}
-          onBuySkin={(skin) => {
-            playSoundEffect('levelup');
-            let success = false;
-            setAppState((prev) => {
-              const currentCredits = prev.credits || 100;
-              if (currentCredits < skin.price) return prev;
-              success = true;
-
-              const updatedOwnedSkins = [...(prev.ownedSkinIds || []), skin.id];
-              const updatedProfile = { ...prev.profile };
-
-              if (skin.avatarUrl) {
-                updatedProfile.avatarUrl = skin.avatarUrl;
-              }
-
-              return {
-                ...prev,
-                credits: currentCredits - skin.price,
-                ownedSkinIds: updatedOwnedSkins,
-                equippedSkinId: skin.id,
-                profile: updatedProfile,
-              };
-            });
-            return success;
+          onBuySkin={async (skin) => {
+            try {
+              const newBalance = await purchaseStoreItem(skin.id);
+              playSoundEffect('levelup');
+              setAppState((prev) => {
+                const updatedProfile = { ...prev.profile };
+                if (skin.avatarUrl) updatedProfile.avatarUrl = skin.avatarUrl;
+                if (skin.titleName) updatedProfile.title = skin.titleName;
+                return {
+                  ...prev,
+                  credits: newBalance,
+                  ownedSkinIds: [...new Set([...(prev.ownedSkinIds || []), skin.id])],
+                  equippedSkinId: skin.id,
+                  profile: updatedProfile,
+                };
+              });
+              return true;
+            } catch (error) {
+              console.error('Skin purchase failed:', error);
+              return false;
+            }
           }}
           onEquipSkin={(skin) => {
             playSoundEffect('click');
@@ -711,14 +757,16 @@ export default function App() {
           onToggleDesignColor={handleToggleDesignColor}
           onBuyAnimation={handleBuyAnimation}
           onEquipAnimation={handleEquipAnimation}
-          onSpinWheelSuccess={(creditsWon) => {
-            playSoundEffect('levelup');
+          onSpinWheelSuccess={async (creditsWon) => {
             const today = getTodayDateString();
-            setAppState((prev) => ({
-              ...prev,
-              credits: (prev.credits || 100) + creditsWon,
-              lastWheelSpinDate: today,
-            }));
+            try {
+              const newBalance = await claimDailyWheel(today, creditsWon);
+              playSoundEffect('levelup');
+              setAppState((prev) => ({ ...prev, credits: newBalance, lastWheelSpinDate: today }));
+            } catch (error) {
+              console.error('Daily wheel claim failed:', error);
+              // Do not grant local credits if the server rejected the claim.
+            }
           }}
           onClose={() => setIsShopOpen(false)}
         />

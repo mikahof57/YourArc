@@ -174,6 +174,10 @@ export const useStore = create<StoreState>((set, get) => ({
             name: profileData.name || prev.profile.name,
             avatarUrl: profileData.avatar_url || prev.profile.avatarUrl,
             gender: profileData.gender || prev.profile.gender,
+            characterCode: profileData.character_code || prev.profile.characterCode,
+            level: profileData.level ?? prev.profile.level,
+            standardPoints: profileData.standard_points ?? prev.profile.standardPoints,
+            credits: profileData.credits ?? prev.profile.credits,
           },
         }));
       }
@@ -249,6 +253,10 @@ export async function syncData(): Promise<void> {
         name: state.profile.name || 'Operative',
         avatar_url: state.profile.avatarUrl || '',
         gender: state.profile.gender || 'm',
+        character_code: state.profile.characterCode || null,
+        level: Number(state.profile.level || 1),
+        standard_points: Number(state.profile.standardPoints || 0),
+        credits: Number((state.profile as any).credits ?? 100),
         updated_at: new Date().toISOString(),
       };
 

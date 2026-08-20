@@ -39,15 +39,15 @@ interface ShopModalProps {
   selectedDesignColors?: string[];
   purchasedAnimationIds?: string[];
   equippedAnimationId?: string;
-  onAddCredits: (amount: number) => void;
-  onBuySkin: (skin: CyberSkin) => boolean;
+  onAddCredits: (amount: number) => void | Promise<void>;
+  onBuySkin: (skin: CyberSkin) => boolean | Promise<boolean>;
   onEquipSkin?: (skin: CyberSkin) => void;
-  onUnlockDesignCustomizer?: () => boolean;
-  onBuyColor?: (color: InterfaceColorOption) => boolean;
+  onUnlockDesignCustomizer?: () => boolean | Promise<boolean>;
+  onBuyColor?: (color: InterfaceColorOption) => boolean | Promise<boolean>;
   onToggleDesignColor?: (colorHex: string) => void;
-  onBuyAnimation?: (anim: UIAnimationOption) => boolean;
+  onBuyAnimation?: (anim: UIAnimationOption) => boolean | Promise<boolean>;
   onEquipAnimation?: (animId: string) => void;
-  onSpinWheelSuccess: (creditsWon: number) => void;
+  onSpinWheelSuccess: (creditsWon: number) => void | Promise<void>;
   onClose: () => void;
   initialTab?: 'wheel' | 'exchange' | 'marketplace' | 'design' | 'animations';
 }
@@ -203,8 +203,14 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   const handlePayNow = () => {
     if (!selectedPackage) return;
 
-    setTimeout(() => {
-      onAddCredits(selectedPackage.credits);
+    setTimeout(async () => {
+      try {
+        await onAddCredits(selectedPackage.credits);
+      } catch (error) {
+        console.error('Credit checkout failed:', error);
+        setPurchaseSuccessMessage(lang === 'en' ? 'Payment could not be started.' : 'Zahlung konnte nicht gestartet werden.');
+        return;
+      }
       const amount = selectedPackage.credits;
       setSelectedPackage(null);
 
@@ -217,7 +223,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   };
 
   // --- BUY SKIN LOGIC ---
-  const handleBuySkinClick = (skin: CyberSkin) => {
+  const handleBuySkinClick = async (skin: CyberSkin) => {
     setMarketError(null);
     setMarketMessage(null);
 
@@ -234,7 +240,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
       return;
     }
 
-    const success = onBuySkin(skin);
+    const success = await onBuySkin(skin);
     if (success) {
       setMarketMessage(
         lang === 'en'
@@ -246,7 +252,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   };
 
   // --- BUY COLOR LOGIC ---
-  const handleBuyColorClick = (color: InterfaceColorOption) => {
+  const handleBuyColorClick = async (color: InterfaceColorOption) => {
     setMarketError(null);
     setMarketMessage(null);
 
@@ -269,7 +275,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
     }
 
     if (onBuyColor) {
-      const ok = onBuyColor(color);
+      const ok = await onBuyColor(color);
       if (ok) {
         setMarketMessage(
           lang === 'en'
@@ -282,7 +288,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   };
 
   // --- BUY ANIMATION LOGIC ---
-  const handleBuyAnimationClick = (anim: UIAnimationOption) => {
+  const handleBuyAnimationClick = async (anim: UIAnimationOption) => {
     setMarketError(null);
     setMarketMessage(null);
 
@@ -303,7 +309,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
     }
 
     if (onBuyAnimation) {
-      const ok = onBuyAnimation(anim);
+      const ok = await onBuyAnimation(anim);
       if (ok) {
         setMarketMessage(
           lang === 'en'

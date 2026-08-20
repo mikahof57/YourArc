@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppState, ChatChannel, ChatMessage, FriendUser } from '../../types';
 import { INITIAL_FRIENDS, DEFAULT_CHAT_STATE } from '../../data/communityData';
 import { ClanShieldBadge } from '../ClanShieldBadge';
+import { getOrCreateDirectConversation, getOrCreateClanConversation, createGroupConversation, loadChatState, sendMessage, subscribeToMessages } from '../../services/communityService';
 import {
   MessageSquare,
   Users,
@@ -61,6 +62,32 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const userClan = appState.userClan;
 
+  // Hydrate chat from Supabase and refresh on realtime message inserts.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const state = await loadChatState();
+        if (active) onUpdateAppState({ chatState: state });
+      } catch (error) {
+        console.error('Chat backend load failed:', error);
+      }
+    })();
+    const channel = subscribeToMessages(async () => {
+      try {
+        const state = await loadChatState();
+        if (active) onUpdateAppState({ chatState: state });
+      } catch (error) {
+        console.error('Chat realtime refresh failed:', error);
+      }
+    });
+    return () => {
+      active = false;
+      channel.unsubscribe();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -109,133 +136,66 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Create new Group Chat
-  const handleCreateGroup = (e: React.FormEvent) => {
+  // Create new Group Chat - persisted in Supabase.
+  const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!groupName.trim() || selectedFriendIds.length === 0) return;
-
-    const newGroupChannel: ChatChannel = {
-      id: 'group_' + Date.now(),
-      name: `⚡ ${groupName.trim()}`,
-      isGroup: true,
-      memberIds: selectedFriendIds,
-      lastMessage: lang === 'en' ? 'Group created! Welcome to the squad.' : 'Gruppe erstellt! Willkommen im Squad.',
-      lastMessageTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      unreadCount: 0,
-      messages: [
-        {
-          id: 'sys_' + Date.now(),
-          senderId: 'system',
-          senderName: 'System',
-          senderAvatar: '',
-          text: lang === 'en'
-            ? `Group "${groupName.trim()}" was successfully created with ${selectedFriendIds.length} friends! 🎉`
-            : `Gruppe "${groupName.trim()}" wurde erfolgreich mit ${selectedFriendIds.length} Freunden erstellt! 🎉`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isUser: false,
-        },
-      ],
-    };
-
-    const updatedChannels = [newGroupChannel, ...chatChannels];
-    updateChatState(updatedChannels);
-
-    // Reset form and open new channel
-    setGroupName('');
-    setSelectedFriendIds([]);
-    setIsCreatingGroup(false);
-    setActiveChannelId(newGroupChannel.id);
+    try {
+      const conversationId = await createGroupConversation(groupName.trim(), selectedFriendIds);
+      const state = await loadChatState();
+      updateChatState(state.channels, state.clanMessages);
+      setGroupName('');
+      setSelectedFriendIds([]);
+      setIsCreatingGroup(false);
+      setActiveChannelId(conversationId);
+    } catch (error) {
+      console.error('Create group chat failed:', error);
+    }
   };
 
-  // Open direct chat with a friend (find existing or create new)
-  const handleOpenDirectChat = (friend: FriendUser) => {
-    let channel = chatChannels.find(
-      (c) => !c.isGroup && c.memberIds.includes(friend.id)
-    );
-
-    if (!channel) {
-      channel = {
-        id: `chat_${friend.id}`,
-        name: friend.name,
-        isGroup: false,
-        avatarUrl: friend.avatarUrl,
-        memberIds: [friend.id],
-        lastMessage: lang === 'en' ? 'Chat started' : 'Chat gestartet',
-        lastMessageTime: lang === 'en' ? 'Now' : 'Jetzt',
-        unreadCount: 0,
-        messages: [
-          {
-            id: 'm_init_' + Date.now(),
-            senderId: friend.id,
-            senderName: friend.name,
-            senderAvatar: friend.avatarUrl,
-            text: lang === 'en'
-              ? `Hey! Great to be connected. Let us motivate each other! 🔥`
-              : `Hey! Schön, dass wir verbunden sind. Lass uns gegenseitig motivieren! 🔥`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isUser: false,
-          },
-        ],
-      };
-      updateChatState([channel, ...chatChannels]);
+  // Open direct chat with a friend. The conversation itself is persisted in Supabase.
+  const handleOpenDirectChat = async (friend: FriendUser) => {
+    try {
+      const conversationId = await getOrCreateDirectConversation(friend.id);
+      const state = await loadChatState();
+      onUpdateAppState({ chatState: state });
+      setActiveChannelId(conversationId);
+    } catch (error) {
+      console.error('Open direct chat failed:', error);
     }
-
-    setActiveChannelId(channel.id);
   };
 
   // Send message in Direct / Group Chat
-  const handleSendMessage = (e?: React.FormEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!messageText.trim() || !activeChannelId) return;
-
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: ChatMessage = {
-      id: 'm_' + Date.now(),
-      senderId: 'user',
-      senderName: appState.profile.name || 'Du',
-      senderAvatar: appState.profile.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=150',
-      text: messageText.trim(),
-      timestamp: timeStr,
-      isUser: true,
-    };
-
     const textToSend = messageText.trim();
     setMessageText('');
-
-    const updatedChannels = chatChannels.map((chan) => {
-      if (chan.id === activeChannelId) {
-        return {
-          ...chan,
-          lastMessage: textToSend,
-          lastMessageTime: timeStr,
-          messages: [...chan.messages, userMsg],
-        };
-      }
-      return chan;
-    });
-
-    updateChatState(updatedChannels);
+    try {
+      await sendMessage(activeChannelId, textToSend);
+      const state = await loadChatState();
+      onUpdateAppState({ chatState: state });
+    } catch (error) {
+      console.error('Send message failed:', error);
+      setMessageText(textToSend);
+    }
   };
 
   // Send Clan Chat Message
-  const handleSendClanMessage = (e?: React.FormEvent) => {
+  const handleSendClanMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!messageText.trim() || !userClan) return;
-
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: ChatMessage = {
-      id: 'cm_' + Date.now(),
-      senderId: 'user',
-      senderName: appState.profile.name || 'Du',
-      senderAvatar: appState.profile.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=150',
-      text: messageText.trim(),
-      timestamp: timeStr,
-      isUser: true,
-    };
-
+    const textToSend = messageText.trim();
     setMessageText('');
-    const updatedClanMsgs = [...clanMessages, userMsg];
-    updateChatState(chatChannels, updatedClanMsgs);
+    try {
+      const conversationId = await getOrCreateClanConversation(userClan.id);
+      await sendMessage(conversationId, textToSend);
+      const state = await loadChatState();
+      onUpdateAppState({ chatState: state });
+    } catch (error) {
+      console.error('Send clan message failed:', error);
+      setMessageText(textToSend);
+    }
   };
 
   // Quick Action Buttons
