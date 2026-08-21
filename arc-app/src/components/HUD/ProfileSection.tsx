@@ -17,7 +17,7 @@ interface ProfileSectionProps {
 export const ProfileSection: React.FC<ProfileSectionProps> = ({
   profile,
   stats,
-  credits = 100,
+  credits = 0,
   lang = 'en',
   onOpenCommunity,
   onOpenShop,

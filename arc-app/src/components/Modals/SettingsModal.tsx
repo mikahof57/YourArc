@@ -41,7 +41,7 @@ interface SettingsModalProps {
   appState: AppState;
   lang?: Language;
   onSetLanguage?: (lang: Language) => void;
-  onSaveProfile: (profile: UserProfile) => void;
+  onSaveProfile: (profile: UserProfile) => Promise<void>;
   onSaveStats: (stats: StatAttribute[]) => void;
   onSaveQuoteSettings: (settings: QuoteSettings) => void;
   onSaveBottomModules: (modules: BottomBarModuleId[]) => void;
@@ -97,6 +97,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // --- PROFILE TAB STATE ---
   const [profile, setProfile] = useState<UserProfile>(appState.profile);
   const [customAvatarInput, setCustomAvatarInput] = useState<string>('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // --- MOTIVATION TAB STATE ---
   const [quoteCategories, setQuoteCategories] = useState<QuoteCategory[] | ['alle']>(
@@ -292,15 +294,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   // Profile Save
-  const handleSaveAll = () => {
-    onSaveProfile(profile);
-    onSaveStats(stats);
-    onSaveQuoteSettings({
-      selectedCategories: quoteCategories,
-      selectedReligion: religionSub,
-    });
-    onSaveBottomModules(selectedModules);
-    onClose();
+  const handleSaveAll = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      await onSaveProfile(profile);
+      onSaveStats(stats);
+      onSaveQuoteSettings({
+        selectedCategories: quoteCategories,
+        selectedReligion: religionSub,
+      });
+      onSaveBottomModules(selectedModules);
+      onClose();
+    } catch (error) {
+      console.error('Profile save failed:', error);
+      setSaveError(
+        lang === 'en'
+          ? 'Could not save profile changes. Please try again.'
+          : 'Profiländerungen konnten nicht gespeichert werden. Bitte versuche es erneut.'
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Toggle Quote Category
@@ -1519,18 +1536,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
         <div className="mt-5 flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+          {saveError && <p className="mr-auto text-xs text-red-400">{saveError}</p>}
           <button
             onClick={onClose}
+            disabled={isSaving}
             className="px-4 py-2 rounded text-xs text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition-all"
           >
             {lang === 'en' ? 'Cancel' : 'Abbrechen'}
           </button>
           <button
             onClick={handleSaveAll}
-            className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-slate-950 font-bold px-6 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(0,240,255,0.4)] active:scale-95"
+            disabled={isSaving}
+            className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 font-bold px-6 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(0,240,255,0.4)] active:scale-95"
           >
             <Check className="w-4 h-4" />
-            <span>{lang === 'en' ? 'SAVE CHANGES' : 'ÄNDERUNGEN SPEICHERN'}</span>
+            <span>
+              {isSaving
+                ? (lang === 'en' ? 'SAVING...' : 'WIRD GESPEICHERT...')
+                : (lang === 'en' ? 'SAVE CHANGES' : 'ÄNDERUNGEN SPEICHERN')}
+            </span>
           </button>
         </div>
 

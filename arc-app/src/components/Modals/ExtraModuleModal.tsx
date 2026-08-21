@@ -25,7 +25,7 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
   onClose,
   reloadsCountToday = 0,
   seenModuleItemIds = {},
-  currentCredits = 100,
+  currentCredits = 0,
   onPerformReload,
   onOpenShop,
 }) => {

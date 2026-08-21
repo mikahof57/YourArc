@@ -50,7 +50,7 @@ export function getInitialState(): AppState {
     ],
     moduleReloadsCountToday: 0,
     seenModuleItemIds: {},
-    credits: 100, // Starts with 100 credits
+    credits: 0, // Temporary local cache until the server balance is hydrated
     consecutiveLoginDays: 1,
     lastDailyBonusDate: today,
     authAccount: null,
@@ -104,9 +104,9 @@ export function loadAppState(): AppState {
       saveAppState(parsed);
     }
 
-    // Default credits to 100 if undefined
+    // Missing legacy local balances must not create synthetic credits.
     if (parsed.credits === undefined || parsed.credits === null) {
-      parsed.credits = 100;
+      parsed.credits = 0;
     }
 
     if (!parsed.consecutiveLoginDays) {
@@ -206,16 +206,6 @@ export function loadAppState(): AppState {
         parsed.consecutiveLoginDays = 1;
       }
 
-      // Award daily login credit bonus (+10 credits every day, +10 bonus on 7-day streak)
-      if (parsed.lastDailyBonusDate !== today) {
-        let dailyBonus = 10;
-        if (parsed.consecutiveLoginDays % 7 === 0) {
-          dailyBonus += 10; // Extra +10 bonus on 7th consecutive day
-        }
-        parsed.credits = (parsed.credits || 100) + dailyBonus;
-        parsed.lastDailyBonusDate = today;
-      }
-
       // Update history
       const historyEntry = {
         date: today,
@@ -231,17 +221,6 @@ export function loadAppState(): AppState {
       parsed.moduleReloadsCountToday = 0;
 
       saveAppState(parsed);
-    } else {
-      // Even if same day, check if initial daily bonus was given
-      if (parsed.lastDailyBonusDate !== today) {
-        let dailyBonus = 10;
-        if ((parsed.consecutiveLoginDays || 1) % 7 === 0) {
-          dailyBonus += 10;
-        }
-        parsed.credits = (parsed.credits || 100) + dailyBonus;
-        parsed.lastDailyBonusDate = today;
-        saveAppState(parsed);
-      }
     }
 
     return parsed;

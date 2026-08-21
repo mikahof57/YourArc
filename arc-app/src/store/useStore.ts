@@ -163,7 +163,7 @@ export const useStore = create<StoreState>((set, get) => ({
       // 3. Fetch Profile
       const { data: profileData, error: profileErr } = await supabase
         .from('profiles')
-        .select('*')
+        .select('user_id,name,avatar_url,gender,character_code,level,standard_points,credits')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -177,7 +177,7 @@ export const useStore = create<StoreState>((set, get) => ({
             characterCode: profileData.character_code || prev.profile.characterCode,
             level: profileData.level ?? prev.profile.level,
             standardPoints: profileData.standard_points ?? prev.profile.standardPoints,
-            credits: profileData.credits ?? prev.profile.credits,
+            credits: profileData.credits ?? 0,
           },
         }));
       }
@@ -256,7 +256,6 @@ export async function syncData(): Promise<void> {
         character_code: state.profile.characterCode || null,
         level: Number(state.profile.level || 1),
         standard_points: Number(state.profile.standardPoints || 0),
-        credits: Number((state.profile as any).credits ?? 100),
         updated_at: new Date().toISOString(),
       };
 
@@ -304,4 +303,3 @@ useStore.subscribe(() => {
     syncData();
   }, 2000);
 });
-

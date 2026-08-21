@@ -168,8 +168,7 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
         if (!active) return;
         if (profile) {
           onUpdateAppState({
-            profile: { ...appState.profile, name: profile.name || appState.profile.name, avatarUrl: profile.avatar_url || appState.profile.avatarUrl, characterCode: profile.character_code },
-            credits: profile.credits ?? appState.credits ?? 100,
+            credits: profile.credits ?? appState.credits ?? 0,
             friends,
             incomingFriendRequests: requests,
             clans,

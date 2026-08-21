@@ -264,7 +264,7 @@ export interface AppState {
   statStreaks?: Record<string, number>; // statId -> streak in days for user
   chatState?: ChatState;
   deletedTasks?: DeletedTaskItem[];
-  credits?: number; // User credit balance (starts at 100)
+  credits?: number; // Server-authoritative user credit balance cached locally
   consecutiveLoginDays?: number; // Daily consecutive login streak count
   lastDailyBonusDate?: string; // YYYY-MM-DD when last daily bonus was granted
   authAccount?: UserAuthAccount | null; // Logged in user account details

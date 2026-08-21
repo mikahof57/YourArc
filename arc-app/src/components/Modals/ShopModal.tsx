@@ -47,7 +47,7 @@ interface ShopModalProps {
   onToggleDesignColor?: (colorHex: string) => void;
   onBuyAnimation?: (anim: UIAnimationOption) => boolean | Promise<boolean>;
   onEquipAnimation?: (animId: string) => void;
-  onSpinWheelSuccess: (creditsWon: number) => void | Promise<void>;
+  onClaimDailyWheel: () => Promise<{ reward: number; balance: number }>;
   onClose: () => void;
   initialTab?: 'wheel' | 'exchange' | 'marketplace' | 'design' | 'animations';
 }
@@ -107,7 +107,7 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   onToggleDesignColor,
   onBuyAnimation,
   onEquipAnimation,
-  onSpinWheelSuccess,
+  onClaimDailyWheel,
   onClose,
   initialTab = 'marketplace',
 }) => {
@@ -150,30 +150,27 @@ export const ShopModal: React.FC<ShopModalProps> = ({
   ];
 
   // --- WHEEL OF FORTUNE SPIN LOGIC ---
-  const handleSpinWheel = () => {
+  const handleSpinWheel = async () => {
     if (hasSpunToday || isSpinning) return;
 
     setIsSpinning(true);
     setWheelWinMessage(null);
 
-    const rand = Math.random();
-
-    let reward = 0;
-    let targetSliceDegree = 0;
-
-    if (rand < 0.01) {
-      reward = 100;
-      targetSliceDegree = 30;
-    } else if (rand < 0.11) {
-      reward = 25;
-      targetSliceDegree = 150;
-    } else if (rand < 0.51) {
-      reward = 5;
-      targetSliceDegree = 270;
-    } else {
-      reward = 0;
-      targetSliceDegree = 90;
+    let reward: number;
+    try {
+      ({ reward } = await onClaimDailyWheel());
+    } catch (error) {
+      console.error('Daily wheel claim failed:', error);
+      setIsSpinning(false);
+      setWheelWinMessage(
+        lang === 'en'
+          ? 'The reward could not be claimed. Please try again.'
+          : 'Die Belohnung konnte nicht eingelöst werden. Bitte versuche es erneut.'
+      );
+      return;
     }
+
+    const targetSliceDegree = reward === 100 ? 30 : reward === 25 ? 150 : reward === 5 ? 270 : 90;
 
     const extraRounds = 360 * 5;
     const finalDegree = wheelRotation + extraRounds + (360 - (targetSliceDegree % 360));
@@ -181,7 +178,6 @@ export const ShopModal: React.FC<ShopModalProps> = ({
 
     setTimeout(() => {
       setIsSpinning(false);
-      onSpinWheelSuccess(reward);
 
       if (reward > 0) {
         setWheelWinMessage(

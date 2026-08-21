@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
-import { ClanData, ClanInvitation, ClanJoinRequest, FriendRequest, FriendUser, ChatChannel, ChatMessage } from '../types';
+import { ClanData, ClanInvitation, ClanJoinRequest, FriendRequest, FriendUser, ChatChannel, ChatMessage, UserProfile } from '../types';
 
 const FALLBACK_AVATAR = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80';
 
@@ -20,14 +20,34 @@ function profileRowToFriend(row: any): FriendUser {
 export async function getMyProfile() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data, error } = await supabase.from('profiles').select('*').eq('user_id', user.id).single();
+  const { data, error } = await supabase.from('profiles').select('user_id,name,avatar_url,gender,character_code,level,standard_points,credits').eq('user_id', user.id).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateMyProfile(profile: Pick<UserProfile, 'name' | 'avatarUrl' | 'gender'>) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({
+      name: profile.name,
+      avatar_url: profile.avatarUrl,
+      gender: profile.gender,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', user.id)
+    .select('user_id,name,avatar_url,gender,character_code,level,standard_points,credits')
+    .single();
+
   if (error) throw error;
   return data;
 }
 
 export async function findProfileByCode(code: string) {
   const clean = code.trim().toUpperCase();
-  const { data, error } = await supabase.from('profiles').select('*').eq('character_code', clean).maybeSingle();
+  const { data, error } = await supabase.from('public_profiles').select('user_id').eq('character_code', clean).maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -39,7 +59,7 @@ export async function loadFriends(): Promise<FriendUser[]> {
   if (error) throw error;
   const ids = (data || []).map((f: any) => f.user_a === user.id ? f.user_b : f.user_a);
   if (!ids.length) return [];
-  const { data: profiles, error: profileError } = await supabase.from('profiles').select('*').in('user_id', ids);
+  const { data: profiles, error: profileError } = await supabase.from('public_profiles').select('user_id,name,character_code,avatar_url,level,is_online,last_seen,standard_points').in('user_id', ids);
   if (profileError) throw profileError;
   return (profiles || []).map(profileRowToFriend);
 }
@@ -54,7 +74,7 @@ export async function loadFriendRequests(): Promise<FriendRequest[]> {
   if (error) throw error;
   const senderIds = [...new Set((data || []).map((r: any) => r.sender_id))];
   if (!senderIds.length) return [];
-  const { data: profiles, error: profileError } = await supabase.from('profiles').select('*').in('user_id', senderIds);
+  const { data: profiles, error: profileError } = await supabase.from('public_profiles').select('user_id,name,character_code,avatar_url,level,standard_points').in('user_id', senderIds);
   if (profileError) throw profileError;
   const profileMap = new Map<string, any>((profiles || []).map((p: any) => [p.user_id, p]));
   return (data || []).map((r: any) => {
@@ -119,7 +139,7 @@ export async function loadClans(): Promise<ClanData[]> {
     ...(joinRequests || []).map((r: any) => r.user_id),
   ])];
   const { data: profiles, error: profileError } = ids.length
-    ? await supabase.from('profiles').select('*').in('user_id', ids)
+    ? await supabase.from('public_profiles').select('user_id,name,character_code,avatar_url,level,is_online,standard_points').in('user_id', ids)
     : { data: [] as any[], error: null };
   if (profileError) throw profileError;
 
@@ -202,7 +222,7 @@ export async function loadChatState(): Promise<{ channels: ChatChannel[]; clanMe
   const { data: members } = await supabase.from('conversation_members').select('conversation_id,user_id').in('conversation_id', ids);
   const { data: messages } = await supabase.from('messages').select('id,conversation_id,sender_id,content,created_at').in('conversation_id', ids).order('created_at', { ascending: true });
   const senderIds = [...new Set((messages || []).map((m: any) => m.sender_id))];
-  const { data: profiles } = senderIds.length ? await supabase.from('profiles').select('*').in('user_id', senderIds) : { data: [] as any[] };
+  const { data: profiles } = senderIds.length ? await supabase.from('public_profiles').select('user_id,name,avatar_url').in('user_id', senderIds) : { data: [] as any[] };
   const profileMap = new Map<string, any>((profiles || []).map((p: any) => [p.user_id, p]));
   const channels: ChatChannel[] = (conversations || []).filter((c: any) => c.type !== 'clan').map((c: any) => {
     const channelMessages = (messages || []).filter((m: any) => m.conversation_id === c.id).map((m: any) => {
@@ -264,7 +284,7 @@ export async function loadClanInvitations(): Promise<ClanInvitation[]> {
   const senderIds = [...new Set((data || []).map((r: any) => r.sender_id))];
   const [{ data: clans }, { data: senders }] = await Promise.all([
     clanIds.length ? supabase.from('clans').select('*').in('id', clanIds) : Promise.resolve({ data: [] as any[] }),
-    senderIds.length ? supabase.from('profiles').select('*').in('user_id', senderIds) : Promise.resolve({ data: [] as any[] }),
+    senderIds.length ? supabase.from('public_profiles').select('user_id,name').in('user_id', senderIds) : Promise.resolve({ data: [] as any[] }),
   ]);
   const clanMap = new Map<string, any>((clans || []).map((c: any) => [c.id, c]));
   const senderMap = new Map<string, any>((senders || []).map((p: any) => [p.user_id, p]));
@@ -341,10 +361,23 @@ export async function purchaseStoreItem(itemId: string) {
   return data as number;
 }
 
-export async function claimDailyWheel(claimDate: string, reward: number) {
-  const { data, error } = await supabase.rpc('claim_daily_wheel', { p_claim_date: claimDate, p_reward: reward });
+export interface DailyWheelResult {
+  reward: number;
+  balance: number;
+}
+
+export async function claimDailyWheel(): Promise<DailyWheelResult> {
+  const { data, error } = await supabase.rpc('claim_daily_wheel');
   if (error) throw error;
-  return data as number;
+
+  const result = Array.isArray(data) ? data[0] : data;
+  const reward = Number(result?.reward);
+  const balance = Number(result?.balance);
+  if (!Number.isFinite(reward) || !Number.isFinite(balance)) {
+    throw new Error('Invalid daily wheel response');
+  }
+
+  return { reward, balance };
 }
 
 export function subscribeToCommunity(callback: () => void) {

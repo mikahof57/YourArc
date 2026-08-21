@@ -41,7 +41,6 @@ interface CalendarWidgetProps {
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
   onUpdateAppState: (updated: Partial<AppState>) => void;
-  onOpenShop: () => void;
   playSoundEffect: (type: 'complete' | 'click' | 'levelup') => void;
 }
 
@@ -51,7 +50,6 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   isMinimized = false,
   onToggleMinimize,
   onUpdateAppState,
-  onOpenShop,
   playSoundEffect,
 }) => {
   const todayStr = getTodayDateString();
@@ -100,9 +98,9 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     ? activeGroupCalendar.events || []
     : privateEvents;
 
-  // Group limit check: 1 free, up to 2 additional (10 credits each) => max 3 group calendars
+  // Monetization must remain disabled until group calendars are server-persisted.
   const existingGroupsCount = groupCalendars.length;
-  const nextGroupCost = existingGroupsCount === 0 ? 0 : 10;
+  const nextGroupCost = 0;
   const canCreateMoreGroups = existingGroupsCount < 3;
 
   // Month navigation helpers
@@ -234,12 +232,6 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   // Submit Create Group Calendar
   const handleConfirmCreateGroup = () => {
     const trimmedName = groupName.trim() || (lang === 'en' ? 'Group Calendar' : 'Gruppenkalender');
-    const credits = appState.credits || 0;
-
-    if (nextGroupCost > 0 && credits < nextGroupCost) {
-      playSoundEffect('click');
-      return;
-    }
 
     playSoundEffect('levelup');
 
@@ -265,10 +257,8 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     };
 
     const updatedGroups = [...groupCalendars, newGroup];
-    const updatedCredits = nextGroupCost > 0 ? credits - nextGroupCost : credits;
 
     onUpdateAppState({
-      credits: updatedCredits,
       calendarState: {
         ...calendarState,
         groupCalendars: updatedGroups,
@@ -1115,20 +1105,18 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
                   <span className="flex items-center space-x-1.5">
                     <Coins className="w-4 h-4 text-amber-400" />
                     <span>
-                      {nextGroupCost === 0
-                        ? (lang === 'en' ? '1st Group Calendar: FREE' : '1. Gruppenkalender: GRATIS')
-                        : (lang === 'en' ? '2nd / 3rd Group Calendar: 10 Credits' : '2. / 3. Gruppenkalender: 10 Credits')}
+                      {lang === 'en' ? 'Group Calendar: FREE' : 'Gruppenkalender: GRATIS'}
                     </span>
                   </span>
                   <span className="text-slate-300">
                     {lang === 'en' ? 'Balance: ' : 'Guthaben: '}
-                    <strong className="text-amber-400 font-bold">{appState.credits || 0} Credits</strong>
+                    <strong className="text-amber-400 font-bold">{appState.credits ?? 0} Credits</strong>
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300">
                   {lang === 'en'
-                    ? 'Each player can unlock up to 2 additional group calendars (max 3 in total).'
-                    : 'Jeder Spieler kann bis zu 2 weitere Gruppenkalender (insgesamt max. 3) freischalten.'}
+                    ? 'Up to 3 local group calendars can currently be created for free.'
+                    : 'Derzeit können bis zu 3 lokale Gruppenkalender kostenlos erstellt werden.'}
                 </p>
               </div>
 
@@ -1291,18 +1279,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
                   {/* Submit Action */}
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-                    {nextGroupCost > 0 && (appState.credits || 0) < nextGroupCost ? (
-                      <button
-                        type="button"
-                        onClick={onOpenShop}
-                        className="px-3 py-2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold hover:bg-amber-500/30 transition-all flex items-center space-x-1"
-                      >
-                        <Coins className="w-3.5 h-3.5" />
-                        <span>{lang === 'en' ? 'Get Credits in Shop' : 'Credits im Shop holen'}</span>
-                      </button>
-                    ) : (
-                      <div />
-                    )}
+                    <div />
 
                     <div className="flex items-center space-x-2">
                       <button
@@ -1314,10 +1291,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
                       </button>
                       <button
                         type="button"
-                        disabled={
-                          !groupName.trim() ||
-                          (nextGroupCost > 0 && (appState.credits || 0) < nextGroupCost)
-                        }
+                        disabled={!groupName.trim()}
                         onClick={handleConfirmCreateGroup}
                         className="px-4 py-2 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold uppercase tracking-wider"
                       >

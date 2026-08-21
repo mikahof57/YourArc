@@ -41,6 +41,7 @@ import { InterfaceColorOption, UIAnimationOption } from './data/shopData';
 import { useStore } from './store/useStore';
 import {
   getMyProfile,
+  updateMyProfile,
   loadFriends,
   loadFriendRequests,
   loadClans,
@@ -78,7 +79,7 @@ export default function App() {
             setAppState((prev) => ({
               ...prev,
               profile: { ...prev.profile, name: profile.name || prev.profile.name, avatarUrl: profile.avatar_url || prev.profile.avatarUrl, characterCode: profile.character_code, isCreated: true },
-              credits: profile.credits ?? prev.credits ?? 100,
+              credits: profile.credits ?? 0,
               friends,
               incomingFriendRequests: requests,
               clans,
@@ -126,7 +127,7 @@ export default function App() {
         // Stripe webhook is authoritative; refresh after a short delay to allow the webhook to settle.
         await new Promise((resolve) => setTimeout(resolve, 1500));
         const profile = await getMyProfile();
-        if (profile) setAppState((prev) => ({ ...prev, credits: profile.credits ?? prev.credits ?? 100 }));
+        if (profile) setAppState((prev) => ({ ...prev, credits: profile.credits ?? 0 }));
       } catch (error) {
         console.error('Could not refresh credits after payment:', error);
       } finally {
@@ -492,7 +493,7 @@ export default function App() {
           <ProfileSection
             profile={appState.profile}
             stats={appState.stats}
-            credits={appState.credits || 100}
+            credits={appState.credits ?? 0}
             lang={lang}
             onOpenCommunity={() => {
               playSoundEffect('click');
@@ -542,10 +543,6 @@ export default function App() {
             isMinimized={!!appState.collapsedWindows?.calendar}
             onToggleMinimize={() => handleToggleWindowCollapse('calendar')}
             onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
-            onOpenShop={() => {
-              playSoundEffect('click');
-              setIsShopOpen(true);
-            }}
             playSoundEffect={playSoundEffect}
           />
         </main>
@@ -612,7 +609,23 @@ export default function App() {
           appState={appState}
           lang={lang}
           onSetLanguage={handleSetLanguage}
-          onSaveProfile={(prof) => setAppState((prev) => ({ ...prev, profile: prof }))}
+          onSaveProfile={async (prof) => {
+            const confirmed = await updateMyProfile({
+              name: prof.name,
+              avatarUrl: prof.avatarUrl,
+              gender: prof.gender,
+            });
+            const confirmedProfile = {
+              name: confirmed.name,
+              avatarUrl: confirmed.avatar_url,
+              gender: confirmed.gender,
+            };
+            setAppState((prev) => ({
+              ...prev,
+              profile: { ...prof, ...confirmedProfile },
+            }));
+            useStore.getState().setProfile(confirmedProfile);
+          }}
           onSaveStats={(stats) => setAppState((prev) => ({ ...prev, stats }))}
           onSaveQuoteSettings={(qs) => setAppState((prev) => ({ ...prev, quoteSettings: qs }))}
           onSaveBottomModules={(mods) =>
@@ -658,7 +671,7 @@ export default function App() {
           lang={lang}
           reloadsCountToday={appState.moduleReloadsCountToday || 0}
           seenModuleItemIds={appState.seenModuleItemIds || {}}
-          currentCredits={appState.credits || 100}
+          currentCredits={appState.credits ?? 0}
           onPerformReload={async (moduleId, newSeenIds) => {
             playSoundEffect('click');
             try {
@@ -699,7 +712,7 @@ export default function App() {
       {isShopOpen && (
         <ShopModal
           lang={lang}
-          currentCredits={appState.credits || 100}
+          currentCredits={appState.credits ?? 0}
           ownedSkinIds={appState.ownedSkinIds || []}
           equippedSkinId={appState.equippedSkinId || ''}
           lastWheelSpinDate={appState.lastWheelSpinDate || ''}
@@ -757,16 +770,12 @@ export default function App() {
           onToggleDesignColor={handleToggleDesignColor}
           onBuyAnimation={handleBuyAnimation}
           onEquipAnimation={handleEquipAnimation}
-          onSpinWheelSuccess={async (creditsWon) => {
+          onClaimDailyWheel={async () => {
             const today = getTodayDateString();
-            try {
-              const newBalance = await claimDailyWheel(today, creditsWon);
-              playSoundEffect('levelup');
-              setAppState((prev) => ({ ...prev, credits: newBalance, lastWheelSpinDate: today }));
-            } catch (error) {
-              console.error('Daily wheel claim failed:', error);
-              // Do not grant local credits if the server rejected the claim.
-            }
+            const result = await claimDailyWheel();
+            playSoundEffect('levelup');
+            setAppState((prev) => ({ ...prev, credits: result.balance, lastWheelSpinDate: today }));
+            return result;
           }}
           onClose={() => setIsShopOpen(false)}
         />
