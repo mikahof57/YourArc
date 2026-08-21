@@ -191,85 +191,12 @@ export const useStore = create<StoreState>((set, get) => ({
 }));
 
 /**
- * Asynchronous function that takes the current habits, stats, and profile state
- * from the store and upserts them into Supabase tables (habits, stats, profiles).
+ * @deprecated Legacy compatibility entry point. Automatic persistence is frozen:
+ * the active six-stat/task model lives in AppState, and profile edits use the
+ * explicit narrow owner-profile update instead of this broad writer.
  */
 export async function syncData(): Promise<void> {
-  const state = useStore.getState();
-  const userId = state.user?.id || state.userId || 'user_default';
-  if (!userId || userId === 'user_default') return;
-
-  try {
-    // 1. Sync Habits
-    if (state.habits && state.habits.length > 0) {
-      const habitsToUpsert = state.habits.map((habit) => ({
-        id: habit.id,
-        title: habit.title,
-        category: habit.category,
-        completed: habit.completed,
-        streak: habit.streak,
-        xp_reward: habit.xpReward ?? 20,
-        user_id: userId,
-        updated_at: new Date().toISOString(),
-      }));
-
-      const { error: habitsError } = await supabase
-        .from('habits')
-        .upsert(habitsToUpsert, { onConflict: 'id' });
-
-      if (habitsError) {
-        console.error('Supabase Sync Error [habits]:', habitsError.message);
-      }
-    }
-
-    // 2. Sync Stats
-    if (state.stats) {
-      const statsObj = state.stats;
-      const statsToUpsert = {
-        user_id: userId,
-        level: statsObj.level ?? 1,
-        current_xp: statsObj.currentXp ?? 0,
-        max_xp: statsObj.maxXp ?? 100,
-        strength: statsObj.strength ?? 10,
-        discipline: statsObj.discipline ?? 10,
-        intellect: statsObj.intellect ?? 10,
-        vitality: statsObj.vitality ?? 10,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: statsError } = await supabase
-        .from('stats')
-        .upsert([statsToUpsert], { onConflict: 'user_id' });
-
-      if (statsError) {
-        console.error('Supabase Sync Error [stats]:', statsError.message);
-      }
-    }
-
-    // 3. Sync Profile
-    if (state.profile) {
-      const profileToUpsert = {
-        user_id: userId,
-        name: state.profile.name || 'Operative',
-        avatar_url: state.profile.avatarUrl || '',
-        gender: state.profile.gender || 'm',
-        character_code: state.profile.characterCode || null,
-        level: Number(state.profile.level || 1),
-        standard_points: Number(state.profile.standardPoints || 0),
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert([profileToUpsert], { onConflict: 'user_id' });
-
-      if (profileError) {
-        console.error('Supabase Sync Error [profiles]:', profileError.message);
-      }
-    }
-  } catch (err) {
-    console.error('Unexpected error during syncWithSupabase:', err);
-  }
+  return;
 }
 
 // Initialize Supabase Auth Session and Listeners
@@ -290,16 +217,4 @@ supabase.auth.onAuthStateChange((_event, session) => {
       store.fetchUserData();
     }
   }
-});
-
-// Debounced auto-sync subscription on state changes (2 seconds debounce)
-let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-useStore.subscribe(() => {
-  if (syncDebounceTimer) {
-    clearTimeout(syncDebounceTimer);
-  }
-  syncDebounceTimer = setTimeout(() => {
-    syncData();
-  }, 2000);
 });
