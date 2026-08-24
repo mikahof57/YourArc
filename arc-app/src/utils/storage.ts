@@ -1,4 +1,4 @@
-import { AppState, Quote, StatAttribute, WeeklyRoutineState } from '../types';
+import { AppState, Quote, WeeklyRoutineState } from '../types';
 import { DEFAULT_STATS } from '../data/defaultStats';
 import { QUOTES_DATABASE } from '../data/quotes';
 import { generateCharacterCode } from '../data/communityData';
@@ -178,46 +178,11 @@ export function loadAppState(): AppState {
       parsed.collapsedWindows = {};
     }
 
-    // Check if new day has arrived
+    // localStorage is only a cache. Server hydration owns ARC progression/day state.
     const today = getTodayDateString();
     if (parsed.lastActiveDate !== today) {
-      // Calculate missing days decay (-1% for uncompleted stats from previous day)
-      const updatedStats = parsed.stats.map((stat) => {
-        const wasCompleted = parsed.completedTasksToday.includes(stat.id);
-        let newValue = stat.value;
-        if (!wasCompleted) {
-          newValue = Math.max(1, newValue - 1); // Decay by -1% if missed
-        }
-        return {
-          ...stat,
-          value: newValue,
-        };
-      });
-
-      // Calculate streak gap
-      const lastDate = new Date(parsed.lastActiveDate || today);
-      const currDate = new Date(today);
-      const diffTime = Math.abs(currDate.getTime() - lastDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 1) {
-        parsed.consecutiveLoginDays = (parsed.consecutiveLoginDays || 1) + 1;
-      } else if (diffDays > 1) {
-        parsed.consecutiveLoginDays = 1;
-      }
-
-      // Update history
-      const historyEntry = {
-        date: today,
-        stats: updatedStats.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.value }), {}),
-      };
-
-      const newHistory = [...(parsed.history || []), historyEntry].slice(-90); // Keep up to 90 days
-
-      parsed.stats = updatedStats;
+      // Use the date only to prevent repeated UI-cache resets before server hydration.
       parsed.lastActiveDate = today;
-      parsed.completedTasksToday = [];
-      parsed.history = newHistory;
       parsed.moduleReloadsCountToday = 0;
 
       saveAppState(parsed);
@@ -268,12 +233,4 @@ export function getRandomQuote(state: AppState): Quote {
   const index = num % filtered.length;
 
   return filtered[index];
-}
-
-import { getActiveTaskForStatAndValue } from '../data/taskDatabase';
-import { Language } from './i18n';
-
-export function getCurrentTaskForStat(stat: StatAttribute, deletedTaskIds: string[] = [], lang: Language | string = 'de') {
-  const dateStr = getTodayDateString();
-  return getActiveTaskForStatAndValue(stat, deletedTaskIds, dateStr, lang);
 }

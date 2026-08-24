@@ -106,6 +106,95 @@ export interface DayHistoryRecord {
   stats: Record<string, number>; // statId -> value
 }
 
+export interface ArcDailyStat {
+  stat_id: string;
+  stat_kind: 'canonical' | 'custom';
+  canonical_stat_key: string | null;
+  display_name: string;
+  emoji: string;
+  current_value: number;
+  start_value: number | null;
+  sort_order: number;
+  active: boolean;
+  task_selection_mode: 'random' | 'sequential';
+  current_task_index: number | null;
+  stat_streak: number;
+  physical_training_cycle: number;
+  max_value_locked: boolean;
+}
+
+export interface ArcDailyAssignment {
+  assignment_id: string;
+  arc_day: string;
+  stat_id: string;
+  task_source: 'preset' | 'custom' | 'special';
+  preset_catalog_version: string | null;
+  preset_task_key: string | null;
+  custom_task_id: string | null;
+  assignment_kind: 'normal' | 'restday';
+  special_rule_key: string | null;
+  title: string;
+  description: string;
+  tier: number | null;
+  sort_order: number;
+  task_metadata: Record<string, unknown>;
+  completion_choice_key: string | null;
+  completed_at: string | null;
+}
+
+export interface ArcServerHistoryPoint {
+  stat_id: string;
+  arc_day: string;
+  value: number;
+  source: string;
+}
+
+export interface ArcDailyPayload {
+  arc_day: string;
+  timezone: string;
+  login_streak: number;
+  lifetime_xp: number;
+  level: number;
+  current_level_xp: number;
+  required_level_xp: number;
+  stats: ArcDailyStat[];
+  assignments: ArcDailyAssignment[];
+  recent_server_history: ArcServerHistoryPoint[];
+}
+
+export interface ArcCompletionResult {
+  confirmed: boolean;
+  idempotent_retry: boolean;
+  assignment_id: string;
+  arc_day: string;
+  stat_id: string;
+  stat_before: number;
+  stat_after: number;
+  stat_delta: number;
+  xp_gained: number;
+  lifetime_xp: number;
+  old_level: number;
+  new_level: number;
+  level_up: boolean;
+  current_level_xp: number;
+  required_level_xp: number;
+  stat_streak: number;
+  assignment_kind: 'normal' | 'restday';
+  completion_choice_key: string | null;
+}
+
+export interface ArcCustomAssignmentSwapResult {
+  confirmed: boolean;
+  assignment_id: string;
+  arc_day: string;
+  stat_id: string;
+  custom_task_id: string;
+  title: string;
+  description: string;
+  sort_order: number;
+  completed: boolean;
+}
+
 export interface FriendUser {
   id: string;
   name: string;
@@ -279,6 +368,13 @@ export interface AppState {
   calendarState?: CalendarState;
   weeklyRoutine?: WeeklyRoutineState;
   collapsedWindows?: CollapsedWindowsState;
+  arcDay?: string;
+  arcTimezone?: string;
+  lifetimeXp?: number;
+  level?: number;
+  currentLevelXp?: number;
+  requiredLevelXp?: number;
+  arcAssignments?: ArcDailyAssignment[];
 }
 
 export type CalendarEventType = 'appointment' | 'goal';

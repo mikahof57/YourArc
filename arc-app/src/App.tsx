@@ -4,12 +4,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { AppState, StatAttribute, TaskItem, BottomBarModuleConfig, UserAuthAccount } from './types';
+import { AppState, ArcDailyPayload, StatAttribute, TaskItem, BottomBarModuleConfig, UserAuthAccount } from './types';
 import {
   loadAppState,
   saveAppState,
   getRandomQuote,
-  getCurrentTaskForStat,
   getTodayDateString,
 } from './utils/storage';
 import { Language, getStoredLanguage, setStoredLanguage, t } from './utils/i18n';
@@ -53,6 +52,34 @@ import {
   spendCredits,
 } from './services/communityService';
 import { startCreditCheckout } from './services/paymentService';
+import {
+  completeArcDailyAssignment,
+  getArcRestdayOptions,
+  getCompletedArcStatIds,
+  loadArcDailyProgression,
+  mapArcAssignmentToTaskItem,
+  mapArcHistoryToUiHistory,
+  mapArcPayloadToUiStats,
+} from './services/progressionService';
+
+function applyArcProgression(prev: AppState, progression: ArcDailyPayload): AppState {
+  return {
+    ...prev,
+    stats: mapArcPayloadToUiStats(progression, prev.stats),
+    completedTasksToday: getCompletedArcStatIds(progression.assignments),
+    history: mapArcHistoryToUiHistory(progression),
+    arcAssignments: progression.assignments,
+    arcDay: progression.arc_day,
+    arcTimezone: progression.timezone,
+    lastActiveDate: progression.arc_day,
+    consecutiveLoginDays: progression.login_streak,
+    lifetimeXp: progression.lifetime_xp,
+    level: progression.level,
+    currentLevelXp: progression.current_level_xp,
+    requiredLevelXp: progression.required_level_xp,
+    statStreaks: Object.fromEntries(progression.stats.map((stat) => [stat.stat_id, stat.stat_streak])),
+  };
+}
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>(() => loadAppState());
@@ -74,12 +101,23 @@ export default function App() {
       setShowRegisterScreen(false);
       (async () => {
         try {
-          const [profile, friends, requests, clans, invitations, inventory] = await Promise.all([getMyProfile(), loadFriends(), loadFriendRequests(), loadClans(), loadClanInvitations(), loadOwnedInventory()]);
-          if (profile) {
-            setAppState((prev) => ({
-              ...prev,
-              profile: { ...prev.profile, name: profile.name || prev.profile.name, avatarUrl: profile.avatar_url || prev.profile.avatarUrl, characterCode: profile.character_code, isCreated: true },
-              credits: profile.credits ?? 0,
+          const [profile, friends, requests, clans, invitations, inventory, progression] = await Promise.all([
+            getMyProfile(),
+            loadFriends(),
+            loadFriendRequests(),
+            loadClans(),
+            loadClanInvitations(),
+            loadOwnedInventory(),
+            loadArcDailyProgression(),
+          ]);
+          setAppState((prev) => {
+            const hydrated = applyArcProgression(prev, progression);
+            return {
+              ...hydrated,
+              profile: profile
+                ? { ...prev.profile, name: profile.name || prev.profile.name, avatarUrl: profile.avatar_url || prev.profile.avatarUrl, characterCode: profile.character_code, isCreated: true }
+                : prev.profile,
+              credits: profile?.credits ?? prev.credits ?? 0,
               friends,
               incomingFriendRequests: requests,
               clans,
@@ -94,9 +132,11 @@ export default function App() {
               }).filter(Boolean)],
               purchasedAnimationIds: inventory.filter((i: any) => i.item_type === 'animation').map((i: any) => i.item_id),
               hasUnlockedDesignCustomizer: inventory.some((i: any) => i.item_id === 'design_customizer'),
-              userClan: clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null,
-            }));
-          }
+              userClan: profile
+                ? clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null
+                : prev.userClan,
+            };
+          });
         } catch (error) {
           console.error('Failed to hydrate ARC backend state:', error);
         }
@@ -322,42 +362,19 @@ export default function App() {
     });
   };
 
-  // Mark task completed (+2% stat boost)
-  const handleMarkTaskDone = (statId: string) => {
+  const handleMarkTaskDone = async (statId: string, choiceKey: string | null = null) => {
+    const assignment = appState.arcAssignments?.find((item) => item.stat_id === statId);
+    if (!assignment) throw new Error('No server daily assignment is available for this stat.');
+    if (assignment.completed_at !== null) return;
+
+    const result = await completeArcDailyAssignment(assignment.assignment_id, choiceKey);
+    if (!result.confirmed) throw new Error('The server did not confirm this assignment completion.');
+
+    // Completion changes become visible only through a fresh authoritative payload.
+    const progression = await loadArcDailyProgression();
+    setAppState((prev) => applyArcProgression(prev, progression));
+
     playSoundEffect('complete');
-
-    setAppState((prev) => {
-      if (prev.completedTasksToday.includes(statId)) return prev;
-
-      const updatedStats = prev.stats.map((s) => {
-        if (s.id === statId) {
-          const newVal = Math.min(100, s.value + 2); // +2 points (+2%)
-          return { ...s, value: newVal };
-        }
-        return s;
-      });
-
-      const today = getTodayDateString();
-      const newCompleted = [...prev.completedTasksToday, statId];
-
-      // Update history
-      const historyCopy = [...prev.history];
-      const todayHistIdx = historyCopy.findIndex((h) => h.date === today);
-      const newStatMap = updatedStats.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.value }), {});
-
-      if (todayHistIdx >= 0) {
-        historyCopy[todayHistIdx] = { date: today, stats: newStatMap };
-      } else {
-        historyCopy.push({ date: today, stats: newStatMap });
-      }
-
-      return {
-        ...prev,
-        stats: updatedStats,
-        completedTasksToday: newCompleted,
-        history: historyCopy,
-      };
-    });
   };
 
   // Active custom bottom bar modules list
@@ -494,6 +511,7 @@ export default function App() {
             profile={appState.profile}
             stats={appState.stats}
             credits={appState.credits ?? 0}
+            level={appState.level}
             lang={lang}
             onOpenCommunity={() => {
               playSoundEffect('click');
@@ -592,16 +610,24 @@ export default function App() {
       )}
 
       {/* Daily Task Detail Modal */}
-      {selectedStatForTask && (
+      {selectedStatForTask && (() => {
+        const selectedAssignment = appState.arcAssignments?.find(
+          (assignment) => assignment.stat_id === selectedStatForTask.id,
+        );
+        if (!selectedAssignment) return null;
+        return (
         <TaskModal
           stat={selectedStatForTask}
-          task={getCurrentTaskForStat(selectedStatForTask, (appState.deletedTasks || []).map((t) => t.id), lang)}
-          isCompleted={appState.completedTasksToday.includes(selectedStatForTask.id)}
+          task={mapArcAssignmentToTaskItem(selectedAssignment)}
+          isCompleted={selectedAssignment.completed_at !== null}
+          assignmentKind={selectedAssignment.assignment_kind}
+          restdayOptions={getArcRestdayOptions(selectedAssignment)}
           lang={lang}
           onClose={() => setSelectedStatForTask(null)}
           onMarkDone={handleMarkTaskDone}
         />
-      )}
+        );
+      })()}
 
       {/* Settings Modal */}
       {isSettingsOpen && (

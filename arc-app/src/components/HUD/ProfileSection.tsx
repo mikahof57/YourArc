@@ -7,6 +7,7 @@ interface ProfileSectionProps {
   profile: UserProfile;
   stats: StatAttribute[];
   credits?: number;
+  level?: number;
   lang?: Language;
   onOpenCommunity?: () => void;
   onOpenShop?: () => void;
@@ -18,6 +19,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
   profile,
   stats,
   credits = 0,
+  level,
   lang = 'en',
   onOpenCommunity,
   onOpenShop,
@@ -26,7 +28,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 }) => {
   const genderSymbol = profile.gender === 'f' ? '♀' : profile.gender === 'm' ? '♂' : '⚥';
   const genderColor = profile.gender === 'f' ? 'text-pink-400' : 'text-cyan-400';
-  const totalLvl = Math.max(1, Math.floor(stats.reduce((acc, s) => acc + s.value, 0) / (stats.length || 1)));
+  const totalLvl = level ?? Math.max(1, Math.floor(stats.reduce((acc, s) => acc + s.value, 0) / (stats.length || 1)));
 
   // Avatar Ranking Frame Calculation
   const isFrameEnabled = profile.showAvatarFrame !== false;

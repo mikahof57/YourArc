@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatAttribute, TaskItem } from '../../types';
 import { X, CheckCircle, Target } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -10,7 +10,9 @@ interface TaskModalProps {
   isCompleted: boolean;
   lang?: Language;
   onClose: () => void;
-  onMarkDone: (statId: string) => void;
+  assignmentKind?: 'normal' | 'restday';
+  restdayOptions?: Array<{ key: string; title: string }>;
+  onMarkDone: (statId: string, choiceKey?: string | null) => Promise<void> | void;
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
@@ -20,9 +22,29 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   lang = 'en',
   onClose,
   onMarkDone,
+  assignmentKind = 'normal',
+  restdayOptions = [],
 }) => {
-  const handleComplete = () => {
-    if (!isCompleted) {
+  const [selectedChoiceKey, setSelectedChoiceKey] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedChoiceKey(null);
+    setSubmitError(null);
+  }, [task.id]);
+
+  const handleComplete = async () => {
+    if (isCompleted) {
+      onClose();
+      return;
+    }
+    if (isSubmitting || (assignmentKind === 'restday' && selectedChoiceKey === null)) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onMarkDone(stat.id, assignmentKind === 'restday' ? selectedChoiceKey : null);
       // Trigger subtle celebration confetti
       try {
         confetti({
@@ -34,10 +56,13 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       } catch (e) {
         // Fallback
       }
-
-      onMarkDone(stat.id);
+      onClose();
+    } catch (error) {
+      console.error('Could not complete daily assignment:', error);
+      setSubmitError(lang === 'de' ? 'Aufgabe konnte nicht abgeschlossen werden.' : 'Could not complete this task.');
+    } finally {
+      setIsSubmitting(false);
     }
-    onClose();
   };
 
   return (
@@ -65,7 +90,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           </div>
           <div>
             <span className="text-[10px] text-cyan-400 uppercase tracking-widest block">
-              {t('statValue', lang)} // {translateStatName(stat.name, lang)} (+2%)
+              {t('statValue', lang)} // {translateStatName(stat.name, lang)}
             </span>
             <h3 className="text-base font-bold text-slate-100">{task.title}</h3>
           </div>
@@ -80,6 +105,30 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           <p className="text-slate-200">{task.description}</p>
         </div>
 
+        {assignmentKind === 'restday' && (
+          <div className="space-y-2 mb-4" role="radiogroup" aria-label="Rest day option">
+            {restdayOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                role="radio"
+                aria-checked={selectedChoiceKey === option.key}
+                disabled={isSubmitting || isCompleted}
+                onClick={() => setSelectedChoiceKey(option.key)}
+                className={`w-full p-3 rounded-lg border text-left text-xs transition-all ${
+                  selectedChoiceKey === option.key
+                    ? 'border-cyan-400 bg-cyan-950/70 text-cyan-100'
+                    : 'border-slate-700 bg-slate-950/70 text-slate-300 hover:border-cyan-500/50'
+                }`}
+              >
+                {option.title}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {submitError && <p className="mb-3 text-xs text-rose-400" role="alert">{submitError}</p>}
+
         {/* Footer Actions */}
         <div className="mt-5 flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
           <button
@@ -90,15 +139,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           </button>
           <button
             onClick={handleComplete}
-            disabled={isCompleted}
+            disabled={isCompleted || isSubmitting || (assignmentKind === 'restday' && selectedChoiceKey === null)}
             className={`flex items-center space-x-2 font-bold px-6 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(0,240,255,0.4)] ${
               isCompleted
                 ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40 opacity-80 cursor-default'
+                : isSubmitting || (assignmentKind === 'restday' && selectedChoiceKey === null)
+                  ? 'bg-slate-800 text-slate-500 border border-slate-700 opacity-70 cursor-not-allowed'
                 : 'bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-slate-950 active:scale-95'
             }`}
           >
             <CheckCircle className="w-4 h-4" />
-            <span>{isCompleted ? t('alreadyDone', lang) : t('markDone', lang)}</span>
+            <span>{isCompleted ? t('alreadyDone', lang) : isSubmitting ? '...' : t('markDone', lang)}</span>
           </button>
         </div>
       </div>
