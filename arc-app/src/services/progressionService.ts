@@ -73,6 +73,22 @@ export async function initializeArcCharacter(
   return requireRpcPayload<ArcDailyPayload>(data, 'initialize_arc_character');
 }
 
+export interface ArcCharacterResetResult {
+  reset: true;
+  characterCode: string;
+}
+
+export async function resetArcCharacter(): Promise<ArcCharacterResetResult> {
+  const { data, error } = await supabase.rpc('reset_arc_character');
+  if (error) throw error;
+
+  const result = requireRpcPayload<{ reset?: unknown; character_code?: unknown }>(data, 'reset_arc_character');
+  if (result.reset !== true || typeof result.character_code !== 'string') {
+    throw new Error('reset_arc_character returned an invalid payload');
+  }
+  return { reset: true, characterCode: result.character_code };
+}
+
 export async function completeArcDailyAssignment(
   assignmentId: string,
   choiceKey: string | null = null,

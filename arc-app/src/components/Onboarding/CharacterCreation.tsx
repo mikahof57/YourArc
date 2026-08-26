@@ -3,22 +3,18 @@ import { UserProfile, StatAttribute, Gender } from '../../types';
 import { AVATAR_PRESETS } from '../../data/avatars';
 import { DEFAULT_STATS } from '../../data/defaultStats';
 import { getTierIndex, getTierInfo } from '../../data/taskDatabase';
-import { Shield, ChevronRight, Check, User, Sparkles, ArrowRight, X, AlertCircle, Loader2 } from 'lucide-react';
+import { Shield, ChevronRight, Check, User, Sparkles, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 
 interface CharacterCreationProps {
   initialProfile: UserProfile;
   initialStats: StatAttribute[];
   onComplete: (profile: UserProfile, selectedStats: StatAttribute[]) => Promise<void> | void;
-  onClose?: () => void;
-  isModalMode?: boolean;
 }
 
 export const CharacterCreation: React.FC<CharacterCreationProps> = ({
   initialProfile,
   initialStats,
   onComplete,
-  onClose,
-  isModalMode = false,
 }) => {
   const [step, setStep] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -73,7 +69,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       height: height ? parseFloat(height) : undefined,
       avatarUrl: selectedAvatarUrl,
       isCreated: true,
-      createdAt: isModalMode ? new Date().toISOString().split('T')[0] : (initialProfile.createdAt || new Date().toISOString().split('T')[0]),
+      createdAt: initialProfile.createdAt || new Date().toISOString().split('T')[0],
       characterCode: initialProfile.characterCode,
     };
 
@@ -108,16 +104,6 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
         <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
         <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-cyan-400 rounded-bl-xl" />
         <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-cyan-400 rounded-br-xl" />
-
-        {isModalMode && onClose && (
-          <button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="absolute top-4 right-4 p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
 
         {/* Progress Header */}
         <div className="mb-6">
@@ -366,12 +352,11 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => isModalMode ? handleFinish() : setStep(3)}
-                disabled={isSubmitting}
+                onClick={() => setStep(3)}
                 className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,240,255,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span>{isSubmitting ? 'SPEICHERN...' : isModalMode ? 'PROFIL SPEICHERN' : 'Weiter zu den Statuswerten'}</span>
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
+                <span>Weiter zu den Statuswerten</span>
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>

@@ -62,6 +62,7 @@ import {
   mapArcAssignmentToTaskItem,
   mapArcHistoryToUiHistory,
   mapArcPayloadToUiStats,
+  resetArcCharacter,
 } from './services/progressionService';
 
 function applyArcProgression(prev: AppState, progression: ArcDailyPayload): AppState {
@@ -236,8 +237,9 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isGraphOpen, setIsGraphOpen] = useState<boolean>(false);
   const [activeExtraModule, setActiveExtraModule] = useState<BottomBarModuleConfig | null>(null);
-  const [isCharacterCreationOpen, setIsCharacterCreationOpen] = useState<boolean>(false);
   const [isConfirmNewCharOpen, setIsConfirmNewCharOpen] = useState<boolean>(false);
+  const [isResettingCharacter, setIsResettingCharacter] = useState<boolean>(false);
+  const [characterResetError, setCharacterResetError] = useState<string | null>(null);
   const [isCommunityOpen, setIsCommunityOpen] = useState<boolean>(false);
   const [isShopOpen, setIsShopOpen] = useState<boolean>(false);
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
@@ -429,8 +431,65 @@ export default function App() {
       gender: confirmedProfile.gender,
     });
     setArcInitializationStatus('initialized');
-    setIsCharacterCreationOpen(false);
     playSoundEffect('levelup');
+  };
+
+  const handleResetCharacter = async () => {
+    setIsResettingCharacter(true);
+    setCharacterResetError(null);
+    try {
+      const resetResult = await resetArcCharacter();
+      const cleanProfile = {
+        ...createFirstTimeProfileDraft(null),
+        characterCode: resetResult.characterCode,
+      };
+      setFirstTimeProfileDraft(cleanProfile);
+      setAppState((prev) => ({
+        ...prev,
+        profile: cleanProfile,
+        stats: DEFAULT_STATS,
+        completedTasksToday: [],
+        history: [],
+        friends: [],
+        incomingFriendRequests: [],
+        sentFriendRequestIds: [],
+        declinedRequestsInfo: {},
+        userClan: null,
+        clans: [],
+        clanInvitations: [],
+        sentClanJoinRequestIds: [],
+        statStreaks: {},
+        chatState: { channels: [], clanMessages: [] },
+        deletedTasks: [],
+        consecutiveLoginDays: 0,
+        arcDay: undefined,
+        arcTimezone: undefined,
+        lifetimeXp: 0,
+        level: 1,
+        currentLevelXp: 0,
+        requiredLevelXp: undefined,
+        arcAssignments: [],
+      }));
+      useStore.getState().setProfile({
+        name: '',
+        avatarUrl: cleanProfile.avatarUrl,
+        gender: cleanProfile.gender,
+        characterCode: cleanProfile.characterCode,
+        level: 1,
+        standardPoints: 0,
+      });
+      setIsConfirmNewCharOpen(false);
+      setArcInitializationStatus('missing');
+    } catch (error) {
+      console.error('ARC character reset failed:', error);
+      setCharacterResetError(
+        getErrorMessage(error) || (lang === 'en'
+          ? 'The character reset failed. Your current character was kept.'
+          : 'Das Zurücksetzen ist fehlgeschlagen. Dein aktueller Charakter wurde beibehalten.'),
+      );
+    } finally {
+      setIsResettingCharacter(false);
+    }
   };
 
   const handleToggleWindowCollapse = (windowKey: 'dailyTasks' | 'motivation' | 'calendar' | 'weeklyRoutine') => {
@@ -544,17 +603,13 @@ export default function App() {
     );
   }
 
-  // Missing progression is first-time onboarding; initialized users only edit presentation.
-  if (arcInitializationStatus === 'missing' || isCharacterCreationOpen) {
+  // Missing authoritative progression always requires the complete three-step flow.
+  if (arcInitializationStatus === 'missing') {
     return (
       <CharacterCreation
-        initialProfile={arcInitializationStatus === 'missing'
-          ? firstTimeProfileDraft ?? createFirstTimeProfileDraft(null)
-          : appState.profile}
-        initialStats={arcInitializationStatus === 'missing' ? DEFAULT_STATS : appState.stats}
+        initialProfile={firstTimeProfileDraft ?? createFirstTimeProfileDraft(null)}
+        initialStats={DEFAULT_STATS}
         onComplete={handleCharacterCreationComplete}
-        onClose={arcInitializationStatus === 'initialized' ? () => setIsCharacterCreationOpen(false) : undefined}
-        isModalMode={arcInitializationStatus === 'initialized'}
       />
     );
   }
@@ -944,7 +999,10 @@ export default function App() {
                 </h3>
               </div>
               <button
-                onClick={() => setIsConfirmNewCharOpen(false)}
+                onClick={() => {
+                  if (!isResettingCharacter) setIsConfirmNewCharOpen(false);
+                }}
+                disabled={isResettingCharacter}
                 className="text-slate-400 hover:text-slate-200 p-1 rounded transition-all"
               >
                 <X className="w-4 h-4" />
@@ -955,8 +1013,8 @@ export default function App() {
             <div className="space-y-3">
               <p className="text-sm text-slate-200 leading-relaxed font-sans font-medium">
                 {lang === 'en'
-                  ? 'Are you sure? You can also adjust your profile anytime in Settings.'
-                  : 'Bist du sicher? Du kannst dein Profil auch in den Einstellungen anpassen.'}
+                  ? 'Your current character, progression, tasks, friends, clan and other character data will be permanently deleted.'
+                  : 'Dein aktueller Charakter, Fortschritt, Aufgaben, Freunde, Clan und weitere Charakterdaten werden dauerhaft gelöscht.'}
               </p>
 
               <div
@@ -968,20 +1026,26 @@ export default function App() {
               >
                 <div className="font-bold flex items-center space-x-2" style={{ color: 'var(--theme-c1)' }}>
                   <Shield className="w-4 h-4 shrink-0" />
-                  <span>{lang === 'en' ? 'Purchases & Progress Secured' : 'Käufe & Fortschritt gesichert'}</span>
+                  <span>{lang === 'en' ? 'Account Property Preserved' : 'Account-Eigentum bleibt erhalten'}</span>
                 </div>
                 <p className="text-slate-300 text-[11px] leading-relaxed font-sans">
                   {lang === 'en'
-                    ? 'All purchases (Credits, interface themes, animations, skins) remain saved across characters and linked to your profile.'
-                    : 'Sämtliche Käufe (Credits, Interface-Farbschemas, Animationen, Skins) bleiben übergreifend gespeichert und mit deinem Profil gekoppelt.'}
+                    ? 'Your credits and purchased shop items will be kept.'
+                    : 'Deine Credits und gekauften Shop-Artikel bleiben erhalten.'}
                 </p>
               </div>
+              {characterResetError && (
+                <p className="text-xs text-rose-300 border border-rose-500/40 bg-rose-950/30 rounded-lg p-3" role="alert">
+                  {characterResetError}
+                </p>
+              )}
             </div>
 
             {/* Action Buttons */}
             <div className="flex items-center justify-end space-x-2.5 pt-3 border-t border-slate-800">
               <button
                 onClick={() => setIsConfirmNewCharOpen(false)}
+                disabled={isResettingCharacter}
                 className="px-4 py-2 rounded text-xs text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition-all"
               >
                 {lang === 'en' ? 'Cancel' : 'Abbrechen'}
@@ -989,17 +1053,19 @@ export default function App() {
               <button
                 onClick={() => {
                   playSoundEffect('click');
-                  setIsConfirmNewCharOpen(false);
-                  setIsCharacterCreationOpen(true);
+                  void handleResetCharacter();
                 }}
+                disabled={isResettingCharacter}
                 className="flex items-center space-x-1.5 font-bold px-4 py-2.5 rounded text-xs text-slate-950 uppercase tracking-wider transition-all active:scale-95 shadow-lg"
                 style={{
                   background: 'var(--theme-grad)',
                   boxShadow: '0 0 15px var(--theme-glow1)',
                 }}
               >
-                <UserCheck className="w-4 h-4 shrink-0" />
-                <span>{lang === 'en' ? 'Yes, Create New Character' : 'Ja, neuen Charakter erstellen'}</span>
+                {isResettingCharacter ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" /> : <UserCheck className="w-4 h-4 shrink-0" />}
+                <span>{isResettingCharacter
+                  ? (lang === 'en' ? 'Resetting…' : 'Wird zurückgesetzt…')
+                  : (lang === 'en' ? 'Delete Character & Continue' : 'Charakter löschen & fortfahren')}</span>
               </button>
             </div>
           </div>
