@@ -714,7 +714,7 @@ export default function App() {
         return (
         <TaskModal
           stat={selectedStatForTask}
-          task={mapArcAssignmentToTaskItem(selectedAssignment)}
+          task={mapArcAssignmentToTaskItem(selectedAssignment, lang)}
           isCompleted={selectedAssignment.completed_at !== null}
           assignmentKind={selectedAssignment.assignment_kind}
           restdayOptions={getArcRestdayOptions(selectedAssignment)}

@@ -1,4 +1,7 @@
 import { supabase } from '../lib/supabaseClient';
+import { createPresetTaskCatalogForLanguage } from '../utils/presetTaskCatalog';
+import type { CanonicalPresetTask } from '../utils/presetTaskCatalog';
+import type { Language } from '../utils/i18n';
 import type {
   ArcCompletionResult,
   ArcCustomAssignmentSwapResult,
@@ -25,6 +28,22 @@ export interface ArcCharacterInitializationProfile {
   name: string;
   avatar_url: string;
   gender: 'm' | 'f' | 'd';
+}
+
+const localizedPresetCatalogs = new Map<Language, Map<string, CanonicalPresetTask>>();
+
+function getLocalizedPresetCatalog(language: Language): Map<string, CanonicalPresetTask> {
+  const cached = localizedPresetCatalogs.get(language);
+  if (cached) return cached;
+
+  const catalog = new Map(
+    createPresetTaskCatalogForLanguage(language).map((task) => [
+      `${task.catalogVersion}:${task.canonicalStatKey}:${task.taskKey}`,
+      task,
+    ]),
+  );
+  localizedPresetCatalogs.set(language, catalog);
+  return catalog;
 }
 
 function requireRpcPayload<T>(data: unknown, rpcName: string): T {
@@ -104,11 +123,22 @@ export function mapArcPayloadToUiStats(
     });
 }
 
-export function mapArcAssignmentToTaskItem(assignment: ArcDailyAssignment): TaskItem {
+export function mapArcAssignmentToTaskItem(
+  assignment: ArcDailyAssignment,
+  language: Language,
+): TaskItem {
+  const localizedPreset = assignment.task_source === 'preset'
+    && assignment.preset_catalog_version
+    && assignment.preset_task_key
+    ? getLocalizedPresetCatalog(language).get(
+      `${assignment.preset_catalog_version}:${assignment.stat_id}:${assignment.preset_task_key}`,
+    )
+    : undefined;
+
   return {
     id: assignment.assignment_id,
-    title: assignment.title,
-    description: assignment.description,
+    title: localizedPreset?.title ?? assignment.title,
+    description: localizedPreset?.description ?? assignment.description,
     order: assignment.sort_order,
     tier: assignment.tier ?? undefined,
     isCustom: assignment.task_source === 'custom',
