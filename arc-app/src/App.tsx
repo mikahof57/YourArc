@@ -56,6 +56,7 @@ import {
   completeArcDailyAssignment,
   getArcRestdayOptions,
   getCompletedArcStatIds,
+  initializeArcCharacter,
   loadArcDailyProgression,
   mapArcAssignmentToTaskItem,
   mapArcHistoryToUiHistory,
@@ -81,11 +82,20 @@ function applyArcProgression(prev: AppState, progression: ArcDailyPayload): AppS
   };
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error !== null && typeof error === 'object') {
+    const message = Reflect.get(error, 'message');
+    if (typeof message === 'string') return message;
+  }
+  return String(error ?? '');
+}
+
 export default function App() {
   const [appState, setAppState] = useState<AppState>(() => loadAppState());
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [lang, setLang] = useState<Language>(() => getStoredLanguage());
-  const [showRegisterScreen, setShowRegisterScreen] = useState<boolean>(true);
+  const [arcInitializationStatus, setArcInitializationStatus] = useState<'idle' | 'loading' | 'initialized' | 'missing' | 'error'>('idle');
 
   // Store Auth state
   const user = useStore((state) => state.user);
@@ -98,20 +108,25 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
-      setShowRegisterScreen(false);
+      setArcInitializationStatus('loading');
       (async () => {
         try {
-          const [profile, friends, requests, clans, invitations, inventory, progression] = await Promise.all([
+          const progressionPromise = loadArcDailyProgression()
+            .then((progression) => ({ progression, error: null }))
+            .catch((error: unknown) => ({ progression: null, error }));
+          const [profile, friends, requests, clans, invitations, inventory, progressionResult] = await Promise.all([
             getMyProfile(),
             loadFriends(),
             loadFriendRequests(),
             loadClans(),
             loadClanInvitations(),
             loadOwnedInventory(),
-            loadArcDailyProgression(),
+            progressionPromise,
           ]);
           setAppState((prev) => {
-            const hydrated = applyArcProgression(prev, progression);
+            const hydrated = progressionResult.progression
+              ? applyArcProgression(prev, progressionResult.progression)
+              : prev;
             return {
               ...hydrated,
               profile: profile
@@ -137,10 +152,24 @@ export default function App() {
                 : prev.userClan,
             };
           });
+          if (progressionResult.progression) {
+            setArcInitializationStatus('initialized');
+          } else {
+            const message = getErrorMessage(progressionResult.error);
+            if (message === 'arc_daily_progress_not_initialized') {
+              setArcInitializationStatus('missing');
+            } else {
+              console.error('Failed to hydrate ARC progression:', progressionResult.error);
+              setArcInitializationStatus('error');
+            }
+          }
         } catch (error) {
           console.error('Failed to hydrate ARC backend state:', error);
+          setArcInitializationStatus('error');
         }
       })();
+    } else {
+      setArcInitializationStatus('idle');
     }
   }, [user]);
 
@@ -338,14 +367,50 @@ export default function App() {
   };
 
   // Onboarding completion
-  const handleCharacterCreationComplete = (profile: any, selectedStats: StatAttribute[]) => {
-    playSoundEffect('levelup');
+  const handleCharacterCreationComplete = async (profile: AppState['profile'], selectedStats: StatAttribute[]) => {
+    if (!user) throw new Error('Authentication is required before ARC initialization.');
+
+    if (arcInitializationStatus === 'missing') {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      await initializeArcCharacter(
+        { name: profile.name, avatar_url: profile.avatarUrl, gender: profile.gender },
+        selectedStats.map((stat) => ({ stat_id: stat.id, start_value: stat.startValue ?? stat.value })),
+        timezone,
+      );
+    } else if (arcInitializationStatus === 'initialized') {
+      await updateMyProfile({ name: profile.name, avatarUrl: profile.avatarUrl, gender: profile.gender });
+    } else {
+      throw new Error('ARC progression initialization state is not ready.');
+    }
+
+    const [progression, confirmedProfile] = await Promise.all([
+      loadArcDailyProgression(),
+      getMyProfile(),
+    ]);
+    if (!confirmedProfile) throw new Error('The confirmed ARC profile could not be loaded.');
+
     setAppState((prev) => ({
-      ...prev,
-      profile,
-      stats: selectedStats,
+      ...applyArcProgression(prev, progression),
+      profile: {
+        ...prev.profile,
+        age: profile.age,
+        weight: profile.weight,
+        height: profile.height,
+        name: confirmedProfile.name,
+        avatarUrl: confirmedProfile.avatar_url,
+        gender: confirmedProfile.gender,
+        characterCode: confirmedProfile.character_code,
+        isCreated: true,
+      },
     }));
+    useStore.getState().setProfile({
+      name: confirmedProfile.name,
+      avatarUrl: confirmedProfile.avatar_url,
+      gender: confirmedProfile.gender,
+    });
+    setArcInitializationStatus('initialized');
     setIsCharacterCreationOpen(false);
+    playSoundEffect('levelup');
   };
 
   const handleToggleWindowCollapse = (windowKey: 'dailyTasks' | 'motivation' | 'calendar' | 'weeklyRoutine') => {
@@ -421,20 +486,7 @@ export default function App() {
     );
   }
 
-  // If character creation not done yet, show wizard first
-  if (!appState.profile.isCreated || isCharacterCreationOpen) {
-    return (
-      <CharacterCreation
-        initialProfile={appState.profile}
-        initialStats={appState.stats}
-        onComplete={handleCharacterCreationComplete}
-        onClose={() => setIsCharacterCreationOpen(false)}
-        isModalMode={appState.profile.isCreated}
-      />
-    );
-  }
-
-  if (showRegisterScreen) {
+  if (!user) {
     return (
       <Register
         lang={lang}
@@ -443,22 +495,44 @@ export default function App() {
           playSoundEffect('levelup');
           setAppState((prev) => ({
             ...prev,
-            profile: {
-              ...prev.profile,
-              name: accountData.username || prev.profile.name,
-            },
+            profile: { ...prev.profile, name: accountData.username || prev.profile.name },
             authAccount: {
               email: accountData.email,
               username: accountData.username,
               token: `tok_${Date.now()}`,
             },
           }));
-          setShowRegisterScreen(false);
         }}
-        onSkipGuest={() => {
-          playSoundEffect('click');
-          setShowRegisterScreen(false);
-        }}
+      />
+    );
+  }
+
+  if (arcInitializationStatus === 'idle' || arcInitializationStatus === 'loading') {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 text-cyan-400 flex items-center justify-center font-mono">
+        <Loader2 className="w-6 h-6 animate-spin mr-3" />
+        <span>LOADING ARC PROGRESSION...</span>
+      </div>
+    );
+  }
+
+  if (arcInitializationStatus === 'error') {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 text-rose-300 flex items-center justify-center p-6 font-mono text-center">
+        ARC progression could not be loaded. Reload the application to retry.
+      </div>
+    );
+  }
+
+  // Missing progression is first-time onboarding; initialized users only edit presentation.
+  if (arcInitializationStatus === 'missing' || isCharacterCreationOpen) {
+    return (
+      <CharacterCreation
+        initialProfile={appState.profile}
+        initialStats={appState.stats}
+        onComplete={handleCharacterCreationComplete}
+        onClose={arcInitializationStatus === 'initialized' ? () => setIsCharacterCreationOpen(false) : undefined}
+        isModalMode={arcInitializationStatus === 'initialized'}
       />
     );
   }

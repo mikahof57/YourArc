@@ -166,7 +166,7 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 
           <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
             {stats.map((st) => {
-              const pct = Math.min(100, Math.max(1, st.value));
+              const pct = Math.min(100, Math.max(0, st.value));
               return (
                 <div key={st.id} className="bg-slate-950/70 p-1.5 sm:p-2 rounded border border-slate-800 hover:border-cyan-500/30 transition-all">
                   <div className="flex items-center justify-between text-xs mb-1">

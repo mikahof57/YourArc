@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import { UserProfile, StatAttribute, Gender } from '../../types';
-import { AVATAR_PRESETS, AvatarOption } from '../../data/avatars';
+import { AVATAR_PRESETS } from '../../data/avatars';
 import { DEFAULT_STATS } from '../../data/defaultStats';
-import { generateCharacterCode } from '../../data/communityData';
 import { getTierIndex, getTierInfo } from '../../data/taskDatabase';
-import { Shield, ChevronRight, Check, User, Sparkles, ArrowRight, X } from 'lucide-react';
+import { Shield, ChevronRight, Check, User, Sparkles, ArrowRight, X, AlertCircle, Loader2 } from 'lucide-react';
 
 interface CharacterCreationProps {
   initialProfile: UserProfile;
   initialStats: StatAttribute[];
-  onComplete: (profile: UserProfile, selectedStats: StatAttribute[]) => void;
+  onComplete: (profile: UserProfile, selectedStats: StatAttribute[]) => Promise<void> | void;
   onClose?: () => void;
   isModalMode?: boolean;
 }
@@ -22,6 +21,8 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
   isModalMode = false,
 }) => {
   const [step, setStep] = useState<number>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Step 1 State - Personal Info
   const [name, setName] = useState<string>(initialProfile.name || '');
@@ -63,7 +64,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     const finalProfile: UserProfile = {
       name: name.trim() || 'Operator',
       gender,
@@ -73,26 +74,11 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       avatarUrl: selectedAvatarUrl,
       isCreated: true,
       createdAt: isModalMode ? new Date().toISOString().split('T')[0] : (initialProfile.createdAt || new Date().toISOString().split('T')[0]),
-      characterCode: isModalMode ? generateCharacterCode() : (initialProfile.characterCode || generateCharacterCode()),
+      characterCode: initialProfile.characterCode,
     };
 
     const finalStats = DEFAULT_STATS.filter((s) => selectedStatIds.includes(s.id)).map((s) => {
       const chosenStartVal = statStartValues[s.id] ?? 0;
-      if (isModalMode) {
-        return {
-          ...s,
-          startValue: chosenStartVal,
-          value: chosenStartVal,
-        };
-      }
-      const existing = initialStats.find((i) => i.id === s.id);
-      if (existing) {
-        return {
-          ...existing,
-          startValue: chosenStartVal,
-          value: Math.max(existing.value, chosenStartVal),
-        };
-      }
       return {
         ...s,
         startValue: chosenStartVal,
@@ -100,7 +86,18 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       };
     });
 
-    onComplete(finalProfile, finalStats);
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onComplete(finalProfile, finalStats);
+    } catch (error) {
+      console.error('ARC character initialization failed:', error);
+      setSubmitError(
+        error instanceof Error ? error.message : 'Die Charakter-Initialisierung ist fehlgeschlagen.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -115,6 +112,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
         {isModalMode && onClose && (
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             className="absolute top-4 right-4 p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
           >
             <X className="w-5 h-5" />
@@ -137,6 +135,13 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
             />
           </div>
         </div>
+
+        {submitError && (
+          <div className="mb-5 p-3 rounded-lg bg-rose-950/80 border border-rose-500/50 text-rose-300 text-xs flex items-start space-x-2" role="alert">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         {/* STEP 1: Personal Data */}
         {step === 1 && (
@@ -361,11 +366,12 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setStep(3)}
-                className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,240,255,0.4)]"
+                onClick={() => isModalMode ? handleFinish() : setStep(3)}
+                disabled={isSubmitting}
+                className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,240,255,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span>Weiter zu den Statuswerten</span>
-                <ChevronRight className="w-4 h-4" />
+                <span>{isSubmitting ? 'SPEICHERN...' : isModalMode ? 'PROFIL SPEICHERN' : 'Weiter zu den Statuswerten'}</span>
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
               </button>
             </div>
           </div>
@@ -437,7 +443,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
                             <input
                               type="range"
                               min={0}
-                              max={90}
+                              max={99}
                               step={1}
                               value={startVal}
                               onChange={(e) =>
@@ -490,10 +496,11 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
               <button
                 type="button"
                 onClick={handleFinish}
-                className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-slate-950 font-bold px-6 py-3 rounded text-xs uppercase tracking-widest transition-all shadow-[0_0_25px_rgba(0,240,255,0.5)] active:scale-95"
+                disabled={isSubmitting}
+                className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-slate-950 font-bold px-6 py-3 rounded text-xs uppercase tracking-widest transition-all shadow-[0_0_25px_rgba(0,240,255,0.5)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span>SYSTEM INITIALISIEREN</span>
-                <ArrowRight className="w-4 h-4" />
+                <span>{isSubmitting ? 'INITIALISIERUNG...' : 'SYSTEM INITIALISIEREN'}</span>
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
               </button>
             </div>
           </div>
