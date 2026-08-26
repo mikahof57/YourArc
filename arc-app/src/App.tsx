@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { AppState, ArcDailyPayload, StatAttribute, TaskItem, BottomBarModuleConfig, UserAuthAccount } from './types';
+import { AppState, ArcDailyPayload, StatAttribute, TaskItem, BottomBarModuleConfig, UserAuthAccount, UserProfile } from './types';
 import {
   loadAppState,
   saveAppState,
@@ -13,6 +13,7 @@ import {
 } from './utils/storage';
 import { Language, getStoredLanguage, setStoredLanguage, t } from './utils/i18n';
 import { ALL_EXTRA_MODULES } from './data/extraModules';
+import { DEFAULT_STATS } from './data/defaultStats';
 
 import { CyberHeader } from './components/CyberHeader';
 import { CharacterCreation } from './components/Onboarding/CharacterCreation';
@@ -91,11 +92,27 @@ function getErrorMessage(error: unknown): string {
   return String(error ?? '');
 }
 
+const DEFAULT_PROFILE_AVATAR_URL =
+  'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80';
+
+function createFirstTimeProfileDraft(serverProfile: Awaited<ReturnType<typeof getMyProfile>>): UserProfile {
+  const serverGender = serverProfile?.gender;
+  return {
+    name: serverProfile?.name ?? '',
+    gender: serverGender === 'f' || serverGender === 'd' ? serverGender : 'm',
+    avatarUrl: serverProfile?.avatar_url || DEFAULT_PROFILE_AVATAR_URL,
+    isCreated: false,
+    createdAt: getTodayDateString(),
+    characterCode: serverProfile?.character_code ?? undefined,
+  };
+}
+
 export default function App() {
   const [appState, setAppState] = useState<AppState>(() => loadAppState());
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [lang, setLang] = useState<Language>(() => getStoredLanguage());
   const [arcInitializationStatus, setArcInitializationStatus] = useState<'idle' | 'loading' | 'initialized' | 'missing' | 'error'>('idle');
+  const [firstTimeProfileDraft, setFirstTimeProfileDraft] = useState<UserProfile | null>(null);
 
   // Store Auth state
   const user = useStore((state) => state.user);
@@ -153,10 +170,12 @@ export default function App() {
             };
           });
           if (progressionResult.progression) {
+            setFirstTimeProfileDraft(null);
             setArcInitializationStatus('initialized');
           } else {
             const message = getErrorMessage(progressionResult.error);
             if (message === 'arc_daily_progress_not_initialized') {
+              setFirstTimeProfileDraft(createFirstTimeProfileDraft(profile));
               setArcInitializationStatus('missing');
             } else {
               console.error('Failed to hydrate ARC progression:', progressionResult.error);
@@ -169,6 +188,7 @@ export default function App() {
         }
       })();
     } else {
+      setFirstTimeProfileDraft(null);
       setArcInitializationStatus('idle');
     }
   }, [user]);
@@ -528,8 +548,10 @@ export default function App() {
   if (arcInitializationStatus === 'missing' || isCharacterCreationOpen) {
     return (
       <CharacterCreation
-        initialProfile={appState.profile}
-        initialStats={appState.stats}
+        initialProfile={arcInitializationStatus === 'missing'
+          ? firstTimeProfileDraft ?? createFirstTimeProfileDraft(null)
+          : appState.profile}
+        initialStats={arcInitializationStatus === 'missing' ? DEFAULT_STATS : appState.stats}
         onComplete={handleCharacterCreationComplete}
         onClose={arcInitializationStatus === 'initialized' ? () => setIsCharacterCreationOpen(false) : undefined}
         isModalMode={arcInitializationStatus === 'initialized'}
