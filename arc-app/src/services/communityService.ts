@@ -94,17 +94,9 @@ export async function loadFriendRequests(): Promise<FriendRequest[]> {
 }
 
 export async function sendFriendRequestByCode(code: string) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('NOT_AUTHENTICATED');
   const target = await findProfileByCode(code);
   if (!target) throw new Error('PLAYER_NOT_FOUND');
-  if (target.user_id === user.id) throw new Error('SELF_REQUEST');
-  const [a, b] = [user.id, target.user_id].sort();
-  const { data: existingFriend } = await supabase.from('friendships').select('id').eq('user_a', a).eq('user_b', b).maybeSingle();
-  if (existingFriend) throw new Error('ALREADY_FRIENDS');
-  const { data: existingRequest } = await supabase.from('friend_requests').select('id,status').eq('sender_id', user.id).eq('receiver_id', target.user_id).eq('status','pending').maybeSingle();
-  if (existingRequest) throw new Error('REQUEST_EXISTS');
-  const { error } = await supabase.from('friend_requests').insert({ sender_id: user.id, receiver_id: target.user_id });
+  const { error } = await supabase.rpc('send_friend_request', { p_receiver_id: target.user_id });
   if (error) throw error;
 }
 
