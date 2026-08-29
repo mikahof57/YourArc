@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AppState,
   FriendUser,
@@ -34,6 +34,7 @@ import {
   AlertCircle,
   ShieldCheck,
   UserMinus,
+  Loader2,
 } from 'lucide-react';
 import {
   INITIAL_FRIENDS,
@@ -55,6 +56,20 @@ import {
   acceptClanJoin, declineClanJoin, setClanMemberRole, removeClanMember, leaveClan,
   subscribeToCommunity,
 } from '../../services/communityService';
+
+function getCommunityErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') return 'Unknown error';
+
+  const candidate = error as Record<string, unknown>;
+  const parts = [candidate.message, candidate.details, candidate.hint]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .map((part) => part.trim());
+  const code = typeof candidate.code === 'string' && candidate.code.trim()
+    ? `Code ${candidate.code.trim()}`
+    : null;
+
+  return [...new Set([...parts, ...(code ? [code] : [])])].join(' — ') || 'Unknown error';
+}
 
 interface CommunityModalProps {
   appState: AppState;
@@ -148,6 +163,13 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
   const [newClanDesc, setNewClanDesc] = useState('');
   const [badgeShapeId, setBadgeShapeId] = useState<number>(1);
   const [badgeColors, setBadgeColors] = useState<string[]>(['#00f0ff', '#a855f7']);
+  const [isCreatingClanPending, setIsCreatingClanPending] = useState(false);
+  const [clanCreationSucceeded, setClanCreationSucceeded] = useState(false);
+  const [clanCreationStatus, setClanCreationStatus] = useState<{
+    text: string;
+    type: 'error' | 'warning';
+  } | null>(null);
+  const clanCreationInFlight = useRef(false);
 
   // Invite member state
   const [inviteMemberCode, setInviteMemberCode] = useState('');
@@ -353,23 +375,69 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
 
   // Create Clan - persisted in Supabase.
   const handleCreateClan = async () => {
-    if (!newClanName.trim() || !newClanTag.trim()) return;
+    if (clanCreationInFlight.current || clanCreationSucceeded) return;
+
+    const name = newClanName.trim();
+    const tag = newClanTag.trim().toUpperCase();
+    if (name.length < 2 || name.length > 40) {
+      setClanCreationStatus({
+        text: lang === 'en'
+          ? 'Clan name must be 2–40 characters long.'
+          : 'Der Clanname muss 2–40 Zeichen lang sein.',
+        type: 'error',
+      });
+      return;
+    }
+    if (tag.length < 2 || tag.length > 8) {
+      setClanCreationStatus({
+        text: lang === 'en'
+          ? 'Clan tag must be 2–8 characters long.'
+          : 'Der Clan-Tag muss 2–8 Zeichen lang sein.',
+        type: 'error',
+      });
+      return;
+    }
+
+    setClanCreationStatus(null);
+    clanCreationInFlight.current = true;
+    setIsCreatingClanPending(true);
     try {
       await createClanBackend({
-        name: newClanName.trim(),
-        tag: newClanTag.trim().toUpperCase(),
+        name,
+        tag,
         description: newClanDesc.trim() || 'Neuer Cyber Clan',
         badgeEmoji: newClanEmoji.trim() || '🛡️',
         badgeConfig: { shapeId: badgeShapeId, colors: badgeColors.length ? badgeColors : ['#00f0ff'], emoji: newClanEmoji.trim() || '🛡️' },
       });
+      setClanCreationSucceeded(true);
+    } catch (error: unknown) {
+      setClanCreationStatus({
+        text: `${lang === 'en' ? 'Clan creation failed' : 'Clan-Erstellung fehlgeschlagen'}: ${getCommunityErrorMessage(error)}`,
+        type: 'error',
+      });
+      clanCreationInFlight.current = false;
+      setIsCreatingClanPending(false);
+      return;
+    }
+
+    try {
       const clans = await loadClans();
       const profile = await (await import('../../services/communityService')).getMyProfile();
       onUpdateAppState({ clans, userClan: profile ? clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null : null });
       setIsCreatingClan(false);
       setNewClanName(''); setNewClanTag(''); setNewClanDesc('');
-    } catch (error: any) {
-      setClanFeedback({ text: error?.message || (lang === 'en' ? 'Could not create clan.' : 'Clan konnte nicht erstellt werden.'), isError: true });
-      setTimeout(() => setClanFeedback(null), 4000);
+      setClanCreationStatus(null);
+      setClanCreationSucceeded(false);
+    } catch (error: unknown) {
+      setClanCreationStatus({
+        text: `${lang === 'en'
+          ? 'Clan was created, but the Community view could not be refreshed. Please reload.'
+          : 'Der Clan wurde erstellt, aber die Community-Ansicht konnte nicht aktualisiert werden. Bitte lade neu.'} (${getCommunityErrorMessage(error)})`,
+        type: 'warning',
+      });
+    } finally {
+      clanCreationInFlight.current = false;
+      setIsCreatingClanPending(false);
     }
   };
 
@@ -1316,7 +1384,10 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                   </p>
 
                   <button
-                    onClick={() => setIsCreatingClan(!isCreatingClan)}
+                    onClick={() => {
+                      setIsCreatingClan(!isCreatingClan);
+                      if (!clanCreationSucceeded) setClanCreationStatus(null);
+                    }}
                     className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2 rounded text-xs transition-all uppercase tracking-wider"
                   >
                     {isCreatingClan
@@ -1344,21 +1415,28 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                         <input
                           type="text"
                           value={newClanName}
-                          onChange={(e) => setNewClanName(e.target.value)}
+                          onChange={(e) => {
+                            setNewClanName(e.target.value);
+                            if (!clanCreationSucceeded) setClanCreationStatus(null);
+                          }}
                           placeholder={lang === 'en' ? 'e.g. Cyber Titans' : 'z.B. Cyber Titans'}
+                          maxLength={40}
                           className="w-full bg-slate-900 border border-slate-700 text-xs text-cyan-200 rounded px-3 py-2 outline-none focus:border-cyan-400"
                         />
                       </div>
                       <div>
                         <label className="block text-xs text-slate-300 mb-1 font-bold">
-                          {lang === 'en' ? 'Clan Tag (2-5 characters)' : 'Clan Tag (2-5 Zeichen)'}
+                          {lang === 'en' ? 'Clan Tag (2-8 characters)' : 'Clan Tag (2-8 Zeichen)'}
                         </label>
                         <input
                           type="text"
                           value={newClanTag}
-                          onChange={(e) => setNewClanTag(e.target.value.toUpperCase())}
+                          onChange={(e) => {
+                            setNewClanTag(e.target.value.toUpperCase());
+                            if (!clanCreationSucceeded) setClanCreationStatus(null);
+                          }}
                           placeholder={lang === 'en' ? 'e.g. TITAN' : 'z.B. TITAN'}
-                          maxLength={5}
+                          maxLength={8}
                           className="w-full bg-slate-900 border border-slate-700 text-xs text-cyan-200 rounded px-3 py-2 outline-none focus:border-cyan-400 uppercase"
                         />
                       </div>
@@ -1546,11 +1624,31 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                       </div>
                     </div>
 
+                    {clanCreationStatus && (
+                      <div
+                        role="alert"
+                        className={`rounded-lg border px-3 py-2.5 text-xs font-bold leading-relaxed ${
+                          clanCreationStatus.type === 'warning'
+                            ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+                            : 'bg-rose-950/80 border-rose-500/50 text-rose-300'
+                        }`}
+                      >
+                        {clanCreationStatus.text}
+                      </div>
+                    )}
+
                     <button
+                      type="button"
                       onClick={handleCreateClan}
-                      className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-lg transition-all active:scale-98"
+                      disabled={isCreatingClanPending || clanCreationSucceeded}
+                      className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 disabled:text-slate-400 disabled:cursor-not-allowed text-slate-950 font-bold py-2.5 rounded-lg text-xs uppercase tracking-wider shadow-lg transition-all active:scale-98 disabled:active:scale-100 flex items-center justify-center gap-2"
                     >
-                      {lang === 'en' ? 'Confirm & Create Clan Now' : 'Clan Jetzt Bestätigen & Gründen'}
+                      {isCreatingClanPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                      {isCreatingClanPending
+                        ? (lang === 'en' ? 'Creating Clan…' : 'Clan wird erstellt…')
+                        : clanCreationSucceeded
+                          ? (lang === 'en' ? 'Clan Created' : 'Clan erstellt')
+                          : (lang === 'en' ? 'Confirm & Create Clan Now' : 'Clan Jetzt Bestätigen & Gründen')}
                     </button>
                   </div>
                 )}
