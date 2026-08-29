@@ -3,6 +3,21 @@ import { ClanData, ClanInvitation, ClanJoinRequest, FriendRequest, FriendUser, C
 
 const FALLBACK_AVATAR = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&auto=format&fit=crop&q=80';
 
+export function getPostgrestErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (!error || typeof error !== 'object') return fallback;
+
+  const candidate = error as Record<string, unknown>;
+  const parts = [candidate.message, candidate.details, candidate.hint]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .map((part) => part.trim());
+  const code = typeof candidate.code === 'string' && candidate.code.trim()
+    ? `Code ${candidate.code.trim()}`
+    : null;
+
+  return [...new Set([...parts, ...(code ? [code] : [])])].join(' — ') || fallback;
+}
+
 function profileRowToFriend(row: any): FriendUser {
   return {
     id: row.user_id,
@@ -219,13 +234,13 @@ export async function loadChatState(): Promise<{ channels: ChatChannel[]; clanMe
   const channels: ChatChannel[] = (conversations || []).filter((c: any) => c.type !== 'clan').map((c: any) => {
     const channelMessages = (messages || []).filter((m: any) => m.conversation_id === c.id).map((m: any) => {
       const p = profileMap.get(m.sender_id) || {};
-      return { id: m.id, senderId: m.sender_id, senderName: p.name || 'OPERATIVE', senderAvatar: p.avatar_url || FALLBACK_AVATAR, text: m.content, timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isUser: m.sender_id === user.id };
+      return { id: m.id, conversationId: m.conversation_id, senderId: m.sender_id, senderName: p.name || 'OPERATIVE', senderAvatar: p.avatar_url || FALLBACK_AVATAR, text: m.content, timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isUser: m.sender_id === user.id };
     });
     return { id: c.id, name: c.name || 'Chat', isGroup: c.type === 'group', memberIds: (members || []).filter((m: any) => m.conversation_id === c.id).map((m: any) => m.user_id), messages: channelMessages, lastMessage: channelMessages.at(-1)?.text, lastMessageTime: channelMessages.at(-1)?.timestamp, unreadCount: 0 };
   });
   const clanMessages: ChatMessage[] = (messages || []).filter((m: any) => (conversations || []).find((c: any) => c.id === m.conversation_id && c.type === 'clan')).map((m: any) => {
     const p = profileMap.get(m.sender_id) || {};
-    return { id: m.id, senderId: m.sender_id, senderName: p.name || 'OPERATIVE', senderAvatar: p.avatar_url || FALLBACK_AVATAR, text: m.content, timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isUser: m.sender_id === user.id };
+    return { id: m.id, conversationId: m.conversation_id, senderId: m.sender_id, senderName: p.name || 'OPERATIVE', senderAvatar: p.avatar_url || FALLBACK_AVATAR, text: m.content, timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isUser: m.sender_id === user.id };
   });
   return { channels, clanMessages };
 }
@@ -241,6 +256,41 @@ export async function sendMessage(conversationId: string, text: string) {
   if (!user) throw new Error('NOT_AUTHENTICATED');
   const { error } = await supabase.from('messages').insert({ conversation_id: conversationId, sender_id: user.id, content: text.trim() });
   if (error) throw error;
+}
+
+export async function loadMyBlockedUserIds(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('user_blocks')
+    .select('blocked_id')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row: { blocked_id: string }) => row.blocked_id);
+}
+
+export async function blockUser(userId: string): Promise<void> {
+  const { error } = await supabase.rpc('block_user', { p_blocked_id: userId });
+  if (error) throw error;
+}
+
+export async function unblockUser(userId: string): Promise<void> {
+  const { error } = await supabase.rpc('unblock_user', { p_blocked_id: userId });
+  if (error) throw error;
+}
+
+export async function reportUser(input: {
+  reportedUserId: string;
+  reason: string;
+  conversationId?: string;
+  messageId?: string;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('report_user', {
+    p_reported_user_id: input.reportedUserId,
+    p_reason: input.reason.trim(),
+    p_conversation_id: input.conversationId || null,
+    p_message_id: input.messageId || null,
+  });
+  if (error) throw error;
+  return data as string;
 }
 
 

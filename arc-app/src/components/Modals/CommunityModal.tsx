@@ -35,6 +35,8 @@ import {
   ShieldCheck,
   UserMinus,
   Loader2,
+  Ban,
+  Flag,
 } from 'lucide-react';
 import {
   INITIAL_FRIENDS,
@@ -54,25 +56,14 @@ import {
   sendFriendRequestByCode, createClan as createClanBackend, requestClanJoin,
   loadClanInvitations, respondToClanInvitation, sendClanInvitationByCode,
   acceptClanJoin, declineClanJoin, setClanMemberRole, removeClanMember, leaveClan,
-  subscribeToCommunity,
+  subscribeToCommunity, blockUser, unblockUser, loadMyBlockedUserIds, reportUser,
+  loadChatState, getPostgrestErrorMessage,
 } from '../../services/communityService';
-
-function getCommunityErrorMessage(error: unknown): string {
-  if (!error || typeof error !== 'object') return 'Unknown error';
-
-  const candidate = error as Record<string, unknown>;
-  const parts = [candidate.message, candidate.details, candidate.hint]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .map((part) => part.trim());
-  const code = typeof candidate.code === 'string' && candidate.code.trim()
-    ? `Code ${candidate.code.trim()}`
-    : null;
-
-  return [...new Set([...parts, ...(code ? [code] : [])])].join(' — ') || 'Unknown error';
-}
 
 interface CommunityModalProps {
   appState: AppState;
+  blockedUserIds: string[];
+  onBlockedUserIdsChange: (userIds: string[]) => void;
   lang?: string;
   onUpdateAppState: (updated: Partial<AppState>) => void;
   onClose: () => void;
@@ -121,6 +112,8 @@ export function getFlameInfo(streakDays: number, lang: string = 'en') {
 
 export const CommunityModal: React.FC<CommunityModalProps> = ({
   appState,
+  blockedUserIds,
+  onBlockedUserIdsChange,
   lang = 'en',
   onUpdateAppState,
   onClose,
@@ -151,6 +144,12 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
   const [addFriendCode, setAddFriendCode] = useState('');
   const [addFriendName, setAddFriendName] = useState('');
   const [friendFeedback, setFriendFeedback] = useState<string | null>(null);
+  const [moderationFeedback, setModerationFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [moderationPendingUserId, setModerationPendingUserId] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<FriendUser | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [isReportPending, setIsReportPending] = useState(false);
+  const [reportFeedback, setReportFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
 
   // Copy code feedback
   const [copiedCode, setCopiedCode] = useState(false);
@@ -180,12 +179,13 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
     let active = true;
     (async () => {
       try {
-        const [profile, friends, requests, clans, invitations] = await Promise.all([
+        const [profile, friends, requests, clans, invitations, blockedUserIds] = await Promise.all([
           (await import('../../services/communityService')).getMyProfile(),
           loadFriends(),
           loadFriendRequests(),
           loadClans(),
           loadClanInvitations(),
+          loadMyBlockedUserIds(),
         ]);
         if (!active) return;
         if (profile) {
@@ -197,6 +197,7 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
             clanInvitations: invitations,
             userClan: clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null,
           });
+          onBlockedUserIdsChange(blockedUserIds);
         }
       } catch (error) {
         console.error('Community backend load failed:', error);
@@ -355,6 +356,111 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
     }
   };
 
+  const refreshAfterBlockChange = async (fallbackBlockedUserIds: string[]) => {
+    try {
+      const [blockedIds, friends, chatState] = await Promise.all([
+        loadMyBlockedUserIds(),
+        loadFriends(),
+        loadChatState(),
+      ]);
+      onBlockedUserIdsChange(blockedIds);
+      onUpdateAppState({ friends, chatState });
+      return true;
+    } catch (error) {
+      onBlockedUserIdsChange(fallbackBlockedUserIds);
+      setModerationFeedback({
+        text: `${lang === 'en'
+          ? 'The block setting was saved, but Community could not be refreshed.'
+          : 'Die Blockierung wurde gespeichert, aber Community konnte nicht aktualisiert werden.'} ${getPostgrestErrorMessage(error, '')}`.trim(),
+        isError: true,
+      });
+      return false;
+    }
+  };
+
+  const handleToggleBlock = async (friend: FriendUser) => {
+    if (moderationPendingUserId) return;
+    const isBlocked = blockedUserIds.includes(friend.id);
+    if (!isBlocked && !window.confirm(
+      lang === 'en'
+        ? `Block ${friend.name}? You will no longer be able to exchange messages with this user. Your friendship will remain.`
+        : `${friend.name} blockieren? Du kannst keine Nachrichten mehr mit diesem Benutzer austauschen. Eure Freundschaft bleibt bestehen.`,
+    )) return;
+
+    setModerationPendingUserId(friend.id);
+    setModerationFeedback(null);
+    try {
+      if (isBlocked) {
+        await unblockUser(friend.id);
+      } else {
+        await blockUser(friend.id);
+      }
+      const fallbackIds = isBlocked
+        ? blockedUserIds.filter((id) => id !== friend.id)
+        : [...new Set([...blockedUserIds, friend.id])];
+      const refreshed = await refreshAfterBlockChange(fallbackIds);
+      if (refreshed) {
+        setModerationFeedback({
+          text: isBlocked
+            ? (lang === 'en' ? `${friend.name} was unblocked.` : `${friend.name} wurde entblockiert.`)
+            : (lang === 'en' ? `${friend.name} was blocked. Existing friendship was not removed.` : `${friend.name} wurde blockiert. Die bestehende Freundschaft wurde nicht entfernt.`),
+        });
+      }
+    } catch (error) {
+      setModerationFeedback({
+        text: getPostgrestErrorMessage(
+          error,
+          lang === 'en' ? 'Block setting could not be changed.' : 'Die Blockierung konnte nicht geändert werden.',
+        ),
+        isError: true,
+      });
+    } finally {
+      setModerationPendingUserId(null);
+    }
+  };
+
+  const openUserReport = (friend: FriendUser) => {
+    setReportTarget(friend);
+    setReportReason('');
+    setReportFeedback(null);
+  };
+
+  const handleSubmitUserReport = async () => {
+    if (!reportTarget || isReportPending) return;
+    const reason = reportReason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      setReportFeedback({
+        text: lang === 'en'
+          ? 'Report reason must be 3–500 characters long.'
+          : 'Der Meldegrund muss 3–500 Zeichen lang sein.',
+        isError: true,
+      });
+      return;
+    }
+
+    setIsReportPending(true);
+    setReportFeedback(null);
+    try {
+      await reportUser({ reportedUserId: reportTarget.id, reason });
+      setReportReason('');
+      setReportFeedback({
+        text: lang === 'en'
+          ? 'Report submitted successfully.'
+          : 'Die Meldung wurde erfolgreich übermittelt.',
+      });
+    } catch (error) {
+      setReportFeedback({
+        text: getPostgrestErrorMessage(
+          error,
+          lang === 'en' ? 'Report could not be submitted.' : 'Die Meldung konnte nicht übermittelt werden.',
+        ),
+        isError: true,
+      });
+    } finally {
+      setIsReportPending(false);
+    }
+  };
+
   // Clan action feedback
   const [clanFeedback, setClanFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
 
@@ -412,7 +518,7 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
       setClanCreationSucceeded(true);
     } catch (error: unknown) {
       setClanCreationStatus({
-        text: `${lang === 'en' ? 'Clan creation failed' : 'Clan-Erstellung fehlgeschlagen'}: ${getCommunityErrorMessage(error)}`,
+        text: `${lang === 'en' ? 'Clan creation failed' : 'Clan-Erstellung fehlgeschlagen'}: ${getPostgrestErrorMessage(error, lang === 'en' ? 'Unknown error' : 'Unbekannter Fehler')}`,
         type: 'error',
       });
       clanCreationInFlight.current = false;
@@ -432,7 +538,7 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
       setClanCreationStatus({
         text: `${lang === 'en'
           ? 'Clan was created, but the Community view could not be refreshed. Please reload.'
-          : 'Der Clan wurde erstellt, aber die Community-Ansicht konnte nicht aktualisiert werden. Bitte lade neu.'} (${getCommunityErrorMessage(error)})`,
+          : 'Der Clan wurde erstellt, aber die Community-Ansicht konnte nicht aktualisiert werden. Bitte lade neu.'} (${getPostgrestErrorMessage(error, lang === 'en' ? 'Unknown error' : 'Unbekannter Fehler')})`,
         type: 'warning',
       });
     } finally {
@@ -858,6 +964,19 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
               )}
             </div>
 
+            {moderationFeedback && (
+              <div
+                role="status"
+                className={`rounded-lg border px-3 py-2.5 text-xs font-bold ${
+                  moderationFeedback.isError
+                    ? 'bg-rose-950/80 border-rose-500/50 text-rose-300'
+                    : 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                }`}
+              >
+                {moderationFeedback.text}
+              </div>
+            )}
+
             {/* Friends Cards List */}
             {friendsList.length === 0 ? (
               <div className="bg-slate-950/80 p-8 rounded-xl border border-slate-800 text-center space-y-3">
@@ -902,6 +1021,11 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                             <span className="text-[10px] bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/40">
                               LVL {friend.level}
                             </span>
+                            {blockedUserIds.includes(friend.id) && (
+                              <span className="text-[9px] bg-rose-950 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/40 font-bold">
+                                {lang === 'en' ? 'Blocked' : 'Blockiert'}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] text-slate-400 font-mono tracking-wider">
                             Code: {friend.characterCode}
@@ -909,7 +1033,7 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center gap-1.5">
                         <div className="text-right">
                           <span className="text-[10px] text-slate-400 block max-w-[180px] sm:max-w-none">
                             {friend.lastTaskCompletedText}
@@ -918,6 +1042,35 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
                             {lang === 'en' ? 'Points:' : 'Punkte:'} {friend.totalPoints} %
                           </span>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => openUserReport(friend)}
+                          title={lang === 'en' ? 'Report user' : 'Benutzer melden'}
+                          className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 hover:text-amber-400 hover:border-amber-500/40 transition-all"
+                        >
+                          <Flag className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBlock(friend)}
+                          disabled={moderationPendingUserId === friend.id}
+                          title={blockedUserIds.includes(friend.id)
+                            ? (lang === 'en' ? 'Unblock user' : 'Blockierung aufheben')
+                            : (lang === 'en' ? 'Block user' : 'Benutzer blockieren')}
+                          className={`p-2 rounded-lg border transition-all disabled:opacity-50 ${
+                            blockedUserIds.includes(friend.id)
+                              ? 'bg-rose-950/80 border-rose-500/50 text-rose-300 hover:bg-rose-900'
+                              : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-rose-400 hover:border-rose-500/40'
+                          }`}
+                        >
+                          {moderationPendingUserId === friend.id
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : blockedUserIds.includes(friend.id)
+                              ? <ShieldCheck className="w-4 h-4" />
+                              : <Ban className="w-4 h-4" />}
+                        </button>
 
                         <button
                           onClick={() => handleRemoveFriend(friend.id)}
@@ -1957,6 +2110,85 @@ export const CommunityModal: React.FC<CommunityModalProps> = ({
           </div>
         )}
       </div>
+
+      {reportTarget && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-amber-500/40 bg-slate-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide">
+                  {lang === 'en' ? 'Report user' : 'Benutzer melden'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  {reportTarget.name} · {reportTarget.characterCode}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportTarget(null)}
+                disabled={isReportPending}
+                className="text-slate-400 hover:text-white disabled:opacity-50"
+                aria-label={lang === 'en' ? 'Close report dialog' : 'Meldedialog schließen'}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                {lang === 'en' ? 'Reason (3–500 characters)' : 'Grund (3–500 Zeichen)'}
+              </label>
+              <textarea
+                value={reportReason}
+                onChange={(event) => {
+                  setReportReason(event.target.value);
+                  setReportFeedback(null);
+                }}
+                maxLength={500}
+                rows={5}
+                placeholder={lang === 'en' ? 'Describe the issue clearly…' : 'Beschreibe das Problem eindeutig…'}
+                className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-amber-400"
+              />
+              <span className="block text-right text-[10px] text-slate-500 mt-1">
+                {reportReason.length}/500
+              </span>
+            </div>
+
+            {reportFeedback && (
+              <div
+                role="status"
+                className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                  reportFeedback.isError
+                    ? 'bg-rose-950/80 border-rose-500/50 text-rose-300'
+                    : 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                }`}
+              >
+                {reportFeedback.text}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReportTarget(null)}
+                disabled={isReportPending}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                {lang === 'en' ? 'Cancel' : 'Abbrechen'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitUserReport}
+                disabled={isReportPending}
+                className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isReportPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {lang === 'en' ? 'Submit report' : 'Meldung senden'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -2,7 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppState, ChatChannel, ChatMessage, FriendUser } from '../../types';
 import { INITIAL_FRIENDS, DEFAULT_CHAT_STATE } from '../../data/communityData';
 import { ClanShieldBadge } from '../ClanShieldBadge';
-import { getOrCreateDirectConversation, getOrCreateClanConversation, createGroupConversation, loadChatState, sendMessage, subscribeToMessages } from '../../services/communityService';
+import {
+  getOrCreateDirectConversation, getOrCreateClanConversation, createGroupConversation,
+  loadChatState, sendMessage, subscribeToMessages, loadMyBlockedUserIds,
+  reportUser, getPostgrestErrorMessage,
+} from '../../services/communityService';
 import {
   MessageSquare,
   Users,
@@ -18,12 +22,17 @@ import {
   Sparkles,
   Flame,
   Zap,
+  Flag,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 import { Language } from '../../utils/i18n';
 
 interface ChatWindowProps {
   appState: AppState;
+  blockedUserIds: string[];
+  onBlockedUserIdsChange: (userIds: string[]) => void;
   lang?: Language;
   onUpdateAppState: (updated: Partial<AppState>) => void;
   onClose: () => void;
@@ -32,6 +41,8 @@ interface ChatWindowProps {
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   appState,
+  blockedUserIds,
+  onBlockedUserIdsChange,
   lang = 'de',
   onUpdateAppState,
   onClose,
@@ -48,11 +59,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // Input text state
   const [messageText, setMessageText] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ message: ChatMessage; conversationId: string } | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [isReportPending, setIsReportPending] = useState(false);
+  const [reportFeedback, setReportFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Derive friends list (only real connected players)
   const friendsList: FriendUser[] = appState.friends || [];
+  const blockedUserIdSet = new Set(blockedUserIds);
+  const chatVisibleFriends = friendsList.filter((friend) => !blockedUserIdSet.has(friend.id));
 
   // Derive channels state
   const chatChannels: ChatChannel[] = appState.chatState?.channels || [];
@@ -61,14 +79,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const clanMessages: ChatMessage[] = appState.chatState?.clanMessages || [];
 
   const userClan = appState.userClan;
+  const isClanChatBlocked = Boolean(
+    userClan?.members.some((member) => blockedUserIdSet.has(member.id)),
+  );
 
   // Hydrate chat from Supabase and refresh on realtime message inserts.
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const state = await loadChatState();
-        if (active) onUpdateAppState({ chatState: state });
+        const [state, blockedIds] = await Promise.all([loadChatState(), loadMyBlockedUserIds()]);
+        if (active) {
+          onUpdateAppState({ chatState: state });
+          onBlockedUserIdsChange(blockedIds);
+        }
       } catch (error) {
         console.error('Chat backend load failed:', error);
       }
@@ -127,6 +151,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // Helper to get active channel
   const activeChannel = chatChannels.find((c) => c.id === activeChannelId);
 
+  useEffect(() => {
+    if (activeChannel && activeChannel.memberIds.some((memberId) => blockedUserIdSet.has(memberId))) {
+      setActiveChannelId(null);
+      setMessageText('');
+      setChatNotice(lang === 'en'
+        ? 'This conversation is unavailable because you blocked a participant.'
+        : 'Diese Unterhaltung ist nicht verfügbar, weil du einen Teilnehmer blockiert hast.');
+    }
+  }, [activeChannel, blockedUserIds, lang]);
+
   // Toggle friend selection for new group
   const toggleFriendSelection = (id: string) => {
     if (selectedFriendIds.includes(id)) {
@@ -155,6 +189,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   // Open direct chat with a friend. The conversation itself is persisted in Supabase.
   const handleOpenDirectChat = async (friend: FriendUser) => {
+    if (blockedUserIdSet.has(friend.id)) {
+      setChatNotice(lang === 'en'
+        ? 'Unblock this user in Community before opening the chat.'
+        : 'Hebe die Blockierung in Community auf, bevor du den Chat öffnest.');
+      return;
+    }
     try {
       const conversationId = await getOrCreateDirectConversation(friend.id);
       const state = await loadChatState();
@@ -184,7 +224,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // Send Clan Chat Message
   const handleSendClanMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!messageText.trim() || !userClan) return;
+    if (!messageText.trim() || !userClan || isClanChatBlocked) return;
     const textToSend = messageText.trim();
     setMessageText('');
     try {
@@ -206,7 +246,56 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   // Filter channels/friends
   const filteredChannels = chatChannels.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
+      && !c.memberIds.some((memberId) => blockedUserIdSet.has(memberId))
   );
+
+  const openMessageReport = (message: ChatMessage, conversationId: string) => {
+    if (message.isUser) return;
+    setReportTarget({ message, conversationId });
+    setReportReason('');
+    setReportFeedback(null);
+  };
+
+  const handleSubmitMessageReport = async () => {
+    if (!reportTarget || isReportPending) return;
+    const reason = reportReason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      setReportFeedback({
+        text: lang === 'en'
+          ? 'Report reason must be 3–500 characters long.'
+          : 'Der Meldegrund muss 3–500 Zeichen lang sein.',
+        isError: true,
+      });
+      return;
+    }
+
+    setIsReportPending(true);
+    setReportFeedback(null);
+    try {
+      await reportUser({
+        reportedUserId: reportTarget.message.senderId,
+        reason,
+        conversationId: reportTarget.conversationId,
+        messageId: reportTarget.message.id,
+      });
+      setReportReason('');
+      setReportFeedback({
+        text: lang === 'en'
+          ? 'Message report submitted successfully.'
+          : 'Die Nachricht wurde erfolgreich gemeldet.',
+      });
+    } catch (error) {
+      setReportFeedback({
+        text: getPostgrestErrorMessage(
+          error,
+          lang === 'en' ? 'Message could not be reported.' : 'Die Nachricht konnte nicht gemeldet werden.',
+        ),
+        isError: true,
+      });
+    } finally {
+      setIsReportPending(false);
+    }
+  };
 
   return (
     <div className="fixed bottom-16 right-2 sm:right-6 w-[calc(100vw-16px)] sm:w-[410px] h-[520px] max-h-[85vh] bg-slate-950/95 border-2 border-cyan-500/50 rounded-2xl shadow-[0_0_35px_rgba(0,240,255,0.25)] flex flex-col overflow-hidden z-50 backdrop-blur-xl font-sans">
@@ -272,6 +361,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </button>
       </div>
 
+      {chatNotice && (
+        <div className="shrink-0 flex items-start gap-2 border-b border-amber-500/30 bg-amber-950/80 px-3 py-2 text-[11px] text-amber-200">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span className="flex-1">{chatNotice}</span>
+          <button type="button" onClick={() => setChatNotice(null)} aria-label={lang === 'en' ? 'Dismiss' : 'Schließen'}>
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* TAB 1: FREUNDE & GRUPPEN */}
       {activeTab === 'friends' && (
         <div className="flex-1 flex flex-col min-h-0 bg-slate-950/60">
@@ -315,7 +414,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       : `Mitglieder Wählen (${selectedFriendIds.length} gewählt)`}
                   </label>
                   <div className="flex-1 overflow-y-auto bg-slate-900/80 border border-slate-800 rounded-lg p-2 space-y-1.5 max-h-48">
-                    {friendsList.map((friend) => {
+                    {chatVisibleFriends.map((friend) => {
                       const isSelected = selectedFriendIds.includes(friend.id);
                       return (
                         <div
@@ -444,6 +543,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       >
                         {msg.timestamp}
                       </span>
+                      {!msg.isUser && activeChannelId && (
+                        <button
+                          type="button"
+                          onClick={() => openMessageReport(msg, activeChannelId)}
+                          className="mt-1 ml-auto flex items-center gap-1 text-[9px] text-slate-500 hover:text-amber-300"
+                        >
+                          <Flag className="w-2.5 h-2.5" />
+                          {lang === 'en' ? 'Report message' : 'Nachricht melden'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -585,11 +694,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <div className="pt-2 border-t border-slate-800">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                     {lang === 'en'
-                      ? `Real Players / Friends (${friendsList.length})`
-                      : `Echte Spieler / Freunde (${friendsList.length})`}
+                      ? `Available Players / Friends (${chatVisibleFriends.length})`
+                      : `Verfügbare Spieler / Freunde (${chatVisibleFriends.length})`}
                   </div>
 
-                  {friendsList.length === 0 ? (
+                  {chatVisibleFriends.length === 0 ? (
                     <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-center flex flex-col items-center justify-center space-y-2">
                       <div className="w-9 h-9 rounded-full bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
                         <Users className="w-4 h-4" />
@@ -618,7 +727,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-1.5">
-                      {friendsList.map((friend) => (
+                      {chatVisibleFriends.map((friend) => (
                         <div
                           key={friend.id}
                           onClick={() => handleOpenDirectChat(friend)}
@@ -689,7 +798,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
               {/* Clan Messages */}
               <div className="flex-1 p-3 overflow-y-auto space-y-3 min-h-0">
-                {clanMessages.map((msg) => (
+                {isClanChatBlocked && (
+                  <div className="h-full flex flex-col items-center justify-center text-center gap-2 text-amber-200">
+                    <AlertTriangle className="w-7 h-7" />
+                    <p className="text-xs font-bold">
+                      {lang === 'en'
+                        ? 'Clan chat is unavailable because you blocked a clan member.'
+                        : 'Der Clan-Chat ist nicht verfügbar, weil du ein Clan-Mitglied blockiert hast.'}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      {lang === 'en' ? 'Manage blocks in Community.' : 'Verwalte Blockierungen in Community.'}
+                    </p>
+                  </div>
+                )}
+                {!isClanChatBlocked && clanMessages.map((msg) => (
                   <div
                     key={msg.id}
                     className={`flex items-start space-x-2 ${
@@ -727,6 +849,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       >
                         {msg.timestamp}
                       </span>
+                      {!msg.isUser && msg.conversationId && (
+                        <button
+                          type="button"
+                          onClick={() => openMessageReport(msg, msg.conversationId!)}
+                          className="mt-1 ml-auto flex items-center gap-1 text-[9px] text-slate-500 hover:text-amber-300"
+                        >
+                          <Flag className="w-2.5 h-2.5" />
+                          {lang === 'en' ? 'Report message' : 'Nachricht melden'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -734,7 +866,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </div>
 
               {/* Clan Quick Actions */}
-              <div className="p-1.5 bg-slate-950/80 border-t border-slate-800 flex items-center gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
+              {!isClanChatBlocked && <div className="p-1.5 bg-slate-950/80 border-t border-slate-800 flex items-center gap-1.5 overflow-x-auto shrink-0 scrollbar-none">
                 <button
                   type="button"
                   onClick={() => handleQuickAction(lang === 'en' ? "Let's collect Clan Points together! 🛡️" : 'Lasst uns gemeinsam Clan-Punkte sammeln! 🛡️')}
@@ -743,10 +875,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   <Shield className="w-3 h-3 text-purple-400" />
                   <span>{lang === 'en' ? '🛡️ Clan Points' : '🛡️ Clan Points'}</span>
                 </button>
-              </div>
+              </div>}
 
               {/* Input Form */}
-              <form
+              {!isClanChatBlocked && <form
                 onSubmit={handleSendClanMessage}
                 className="p-2 bg-slate-900 border-t border-slate-800 flex items-center space-x-2 shrink-0"
               >
@@ -764,7 +896,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 >
                   <Send className="w-4 h-4" />
                 </button>
-              </form>
+              </form>}
             </div>
           ) : (
             /* NO CLAN STATE */
@@ -795,6 +927,84 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {reportTarget && (
+        <div className="absolute inset-0 z-[80] bg-slate-950/95 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-amber-500/40 bg-slate-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide">
+                  {lang === 'en' ? 'Report message' : 'Nachricht melden'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  {lang === 'en' ? 'Sender' : 'Absender'}: {reportTarget.message.senderName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportTarget(null)}
+                disabled={isReportPending}
+                className="text-slate-400 hover:text-white disabled:opacity-50"
+                aria-label={lang === 'en' ? 'Close report dialog' : 'Meldedialog schließen'}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300 line-clamp-3">
+              {reportTarget.message.text}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                {lang === 'en' ? 'Reason (3–500 characters)' : 'Grund (3–500 Zeichen)'}
+              </label>
+              <textarea
+                value={reportReason}
+                onChange={(event) => {
+                  setReportReason(event.target.value);
+                  setReportFeedback(null);
+                }}
+                maxLength={500}
+                rows={4}
+                placeholder={lang === 'en' ? 'Describe the issue clearly…' : 'Beschreibe das Problem eindeutig…'}
+                className="w-full resize-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-amber-400"
+              />
+              <span className="block text-right text-[10px] text-slate-500 mt-1">{reportReason.length}/500</span>
+            </div>
+
+            {reportFeedback && (
+              <div className={`rounded-lg border px-3 py-2 text-xs font-bold ${
+                reportFeedback.isError
+                  ? 'bg-rose-950/80 border-rose-500/50 text-rose-300'
+                  : 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+              }`} role="status">
+                {reportFeedback.text}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReportTarget(null)}
+                disabled={isReportPending}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                {lang === 'en' ? 'Cancel' : 'Abbrechen'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitMessageReport}
+                disabled={isReportPending}
+                className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isReportPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {lang === 'en' ? 'Submit report' : 'Meldung senden'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -114,6 +114,7 @@ export default function App() {
   const [lang, setLang] = useState<Language>(() => getStoredLanguage());
   const [arcInitializationStatus, setArcInitializationStatus] = useState<'idle' | 'loading' | 'initialized' | 'missing' | 'error'>('idle');
   const [firstTimeProfileDraft, setFirstTimeProfileDraft] = useState<UserProfile | null>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
 
   // Store Auth state
   const user = useStore((state) => state.user);
@@ -123,6 +124,10 @@ export default function App() {
   useEffect(() => {
     initializeAuth();
   }, [initializeAuth]);
+
+  useEffect(() => {
+    setBlockedUserIds([]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (user) {
@@ -470,6 +475,7 @@ export default function App() {
         requiredLevelXp: undefined,
         arcAssignments: [],
       }));
+      setBlockedUserIds([]);
       useStore.getState().setProfile({
         name: '',
         avatarUrl: cleanProfile.avatarUrl,
@@ -750,6 +756,8 @@ export default function App() {
       {isChatOpen && (
         <ChatWindow
           appState={appState}
+          blockedUserIds={blockedUserIds}
+          onBlockedUserIdsChange={setBlockedUserIds}
           lang={lang}
           onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
           onClose={() => setIsChatOpen(false)}
@@ -879,6 +887,8 @@ export default function App() {
       {isCommunityOpen && (
         <CommunityModal
           appState={appState}
+          blockedUserIds={blockedUserIds}
+          onBlockedUserIdsChange={setBlockedUserIds}
           lang={lang}
           onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
           onClose={() => setIsCommunityOpen(false)}
