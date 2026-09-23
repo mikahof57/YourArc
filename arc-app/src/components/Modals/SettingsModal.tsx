@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   AppState,
   StatAttribute,
@@ -11,10 +11,9 @@ import {
   DeletedTaskItem,
 } from '../../types';
 import { ALL_EXTRA_MODULES } from '../../data/extraModules';
-import { AVATAR_PRESETS } from '../../data/avatars';
+import { getLocalizedModuleConfig } from '../../data/extraModulesTranslations';
 import { AVAILABLE_SKINS, translateSkinName } from '../../data/skinData';
 import { getTierIndex, getTierInfo, get365PresetTasksForStat } from '../../data/taskDatabase';
-import { INTERFACE_COLOR_PALETTE, UI_ANIMATION_OPTIONS } from '../../data/shopData';
 import {
   X,
   Plus,
@@ -30,27 +29,30 @@ import {
   Sparkles,
   Lock,
   RotateCcw,
-  Palette,
-  Film,
-  Zap,
   Globe,
+  Download,
+  HardDrive,
+  ExternalLink,
 } from 'lucide-react';
 import { Language, t, translateStatName } from '../../utils/i18n';
+import { ARC_RELEASE_LINKS } from '../../config/releaseLinks';
+import { useModalAccessibility } from '../../hooks/useModalAccessibility';
 
 interface SettingsModalProps {
   appState: AppState;
   lang?: Language;
   onSetLanguage?: (lang: Language) => void;
   onSaveProfile: (profile: UserProfile) => Promise<void>;
-  onSaveStats: (stats: StatAttribute[]) => void;
+  onSaveStats: (stats: StatAttribute[]) => Promise<void>;
   onSaveQuoteSettings: (settings: QuoteSettings) => void;
   onSaveBottomModules: (modules: BottomBarModuleId[]) => void;
   onSaveDeletedTasks?: (deletedTasks: DeletedTaskItem[]) => void;
   onOpenDeletedTasksModal?: () => void;
-  onToggleDesignColor?: (colorHex: string) => void;
-  onEquipAnimation?: (animId: string) => void;
-  onOpenShopWithTab?: (tab: 'design' | 'animations') => void;
   onClose: () => void;
+  onExportBackup: () => Promise<void>;
+  onImportBackup: (file: File) => Promise<void>;
+  onRequestReset: () => void;
+  onReplayIntroduction?: () => void;
 }
 
 const EMOJI_OPTIONS = ['📚', '💪', '🧘‍♂️', '⚡', '💼', '💎', '🔥', '🧠', '🛡️', '🎯', '👑', '🚀', '🥊', '🏛️'];
@@ -65,13 +67,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveBottomModules,
   onSaveDeletedTasks,
   onOpenDeletedTasksModal,
-  onToggleDesignColor,
-  onEquipAnimation,
-  onOpenShopWithTab,
   onClose,
+  onExportBackup,
+  onImportBackup,
+  onRequestReset,
+  onReplayIntroduction,
 }) => {
   const lang: Language = (rawLang === 'en' ? 'en' : 'de');
-  const [activeTab, setActiveTab] = useState<'stats' | 'profile' | 'motivation' | 'bottom_bar' | 'design' | 'language'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'profile' | 'motivation' | 'bottom_bar' | 'language' | 'data'>('stats');
+  const dialogRef = useModalAccessibility<HTMLDivElement>(onClose);
+  const navigationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Scroll only the strip, never the dialog or document.
+    const strip = navigationRef.current;
+    const selected = strip?.querySelector<HTMLButtonElement>('[aria-pressed="true"]');
+    if (!strip || !selected) return;
+    const stripBounds = strip.getBoundingClientRect();
+    const selectedBounds = selected.getBoundingClientRect();
+    if (selectedBounds.left < stripBounds.left + 8) strip.scrollLeft -= stripBounds.left + 8 - selectedBounds.left;
+    else if (selectedBounds.right > stripBounds.right - 8) strip.scrollLeft += selectedBounds.right - stripBounds.right + 8;
+  }, [activeTab, lang]);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [dataAction, setDataAction] = useState<'export' | 'import' | null>(null);
+  const [dataMessage, setDataMessage] = useState<string | null>(null);
 
   // --- STATS TAB STATE ---
   const [stats, setStats] = useState<StatAttribute[]>(appState.stats);
@@ -96,7 +114,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // --- PROFILE TAB STATE ---
   const [profile, setProfile] = useState<UserProfile>(appState.profile);
-  const [customAvatarInput, setCustomAvatarInput] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -146,13 +163,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       name: newStatName.trim(),
       emoji: newStatEmoji,
       value: 1,
+      startValue: 1,
       taskSelectionMode: 'random',
+      isCustom: true,
       tasks: [
         {
           id: `t-${Date.now()}`,
           title: `${newStatName.trim()} Aufgabe`,
           description: `Tägliche Gewohnheit für ${newStatName.trim()} ausführen.`,
           order: 1,
+          isCustom: true,
         },
       ],
     };
@@ -301,7 +321,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     try {
       await onSaveProfile(profile);
-      onSaveStats(stats);
+      await onSaveStats(stats);
       onSaveQuoteSettings({
         selectedCategories: quoteCategories,
         selectedReligion: religionSub,
@@ -352,9 +372,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleExportBackup = async () => {
+    setDataAction('export'); setDataMessage(null);
+    try {
+      await onExportBackup();
+      setDataMessage(lang === 'en' ? 'Backup exported successfully.' : 'Backup wurde erfolgreich exportiert.');
+    } catch {
+      setDataMessage(lang === 'en' ? 'Backup export failed.' : 'Backup-Export fehlgeschlagen.');
+    } finally { setDataAction(null); }
+  };
+
+  const handleImportFile = async (file: File) => {
+    const confirmed = window.confirm(lang === 'en'
+      ? 'Replace the current local progress with this backup? ARC creates a safety backup first.'
+      : 'Den aktuellen lokalen Fortschritt durch dieses Backup ersetzen? ARC erstellt vorher ein Sicherheits-Backup.');
+    if (!confirmed) return;
+    setDataAction('import'); setDataMessage(null);
+    try {
+      await onImportBackup(file);
+      setDataMessage(lang === 'en' ? 'Backup imported successfully.' : 'Backup wurde erfolgreich importiert.');
+    } catch {
+      setDataMessage(lang === 'en' ? 'This backup is invalid, corrupted or unsupported.' : 'Dieses Backup ist ungültig, beschädigt oder nicht unterstützt.');
+    } finally {
+      setDataAction(null);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
-      <div className="relative w-full max-w-3xl bg-slate-900 border border-cyan-500/40 rounded-xl p-4 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto max-h-[90vh] flex flex-col">
+    <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="arc-settings-title" className="arc-modal arc-settings-console relative w-full max-w-3xl bg-slate-900 border border-cyan-500/40 rounded-xl p-4 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto max-h-[90vh] flex flex-col">
         {/* Corner Accents */}
         <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl" />
         <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
@@ -364,20 +411,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
+          aria-label={lang === 'en' ? 'Close settings' : 'Einstellungen schließen'}
+          className="arc-settings-close absolute top-4 right-4 p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
         >
           <X className="w-5 h-5" />
         </button>
 
+        {onReplayIntroduction && <button type="button" className="arc-intro-replay" onClick={onReplayIntroduction}><RotateCcw aria-hidden="true" />{t('introReplay', lang)}</button>}
+
         {/* Header Tabs */}
-        <div className="border-b border-slate-800 pb-3 mb-4 pr-10">
-          <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide mb-3 flex items-center space-x-2">
+        <div className="arc-settings-header border-b border-slate-800 pb-3 mb-4 pr-10">
+          <h2 id="arc-settings-title" className="text-lg font-bold text-slate-100 uppercase tracking-wide mb-3 flex items-center space-x-2">
             <Sliders className="w-5 h-5 text-cyan-400" />
             <span>{lang === 'en' ? 'SYSTEM SETTINGS' : 'SYSTEM EINSTELLUNGEN'}</span>
           </h2>
 
-          <div className="flex flex-wrap gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <div ref={navigationRef} role="group" aria-label={lang === 'en' ? 'Settings categories' : 'Einstellungskategorien'} className="arc-settings-navigation flex flex-wrap gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
             <button
+              aria-pressed={activeTab === 'stats'}
               onClick={() => setActiveTab('stats')}
               className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
                 activeTab === 'stats'
@@ -390,6 +441,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
 
             <button
+              aria-pressed={activeTab === 'profile'}
               onClick={() => setActiveTab('profile')}
               className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
                 activeTab === 'profile'
@@ -402,6 +454,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
 
             <button
+              aria-pressed={activeTab === 'motivation'}
               onClick={() => setActiveTab('motivation')}
               className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
                 activeTab === 'motivation'
@@ -414,6 +467,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
 
             <button
+              aria-pressed={activeTab === 'bottom_bar'}
               onClick={() => setActiveTab('bottom_bar')}
               className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
                 activeTab === 'bottom_bar'
@@ -426,18 +480,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('design')}
-              className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
-                activeTab === 'design'
-                  ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(0,240,255,0.2)]'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Palette className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Design & FX</span>
-            </button>
-
-            <button
+              aria-pressed={activeTab === 'language'}
               onClick={() => setActiveTab('language')}
               className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
                 activeTab === 'language'
@@ -448,9 +491,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Globe className="w-3.5 h-3.5 text-cyan-400" />
               <span>{t('tabLanguage', lang)}</span>
             </button>
+            <button
+              aria-pressed={activeTab === 'data'}
+              onClick={() => setActiveTab('data')}
+              className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${activeTab === 'data' ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              <span>{lang === 'en' ? 'Data & Storage' : 'Daten & Speicher'}</span>
+            </button>
           </div>
         </div>
 
+        <div className="arc-settings-body" key={activeTab}>
         {/* TAB 1: STATUSWERTE & AUFGABEN */}
         {activeTab === 'stats' && (
           <div className="space-y-4 overflow-y-auto pr-1 flex-1">
@@ -469,7 +521,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {isAddingNewStat && (
               <div className="bg-slate-950 p-3 rounded-lg border border-cyan-500/30 space-y-3 animate-fadeIn">
                 <div className="text-xs font-bold text-cyan-400">{lang === 'en' ? 'Create new custom attribute' : 'Neuen eigenen Statuswert anlegen'}</div>
-                <div className="flex gap-2">
+                <div className="arc-settings-new-stat flex gap-2">
                   <input
                     type="text"
                     value={newStatName}
@@ -520,7 +572,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {currentActiveStat && (
               <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-4">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-                  <div className="flex items-center space-x-2">
+                  <div className="arc-settings-stat-name flex items-center space-x-2">
                     {/* Square Emoji Picker Button */}
                     <div className="relative">
                       <button
@@ -624,7 +676,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         : 'Das Anpassen des Prozentwerts schaltet alle Aufgaben und Protokolle bis zu diesem Wert frei (z.B. 70%).'}
                     </span>
                   </div>
-                  <div className="flex items-center space-x-2 shrink-0">
+                  <div className="arc-settings-percentage flex items-center space-x-2 shrink-0">
                     <input
                       type="range"
                       min={0}
@@ -675,9 +727,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </span>
                   </span>
 
-                  <div className="flex items-center space-x-2">
+                  <div className="arc-settings-task-actions flex items-center space-x-2">
                     {/* Task Tier Filter Tabs */}
-                    <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded border border-slate-800 text-[10px]">
+                    <div className="arc-settings-task-filter flex items-center space-x-1 bg-slate-950 p-1 rounded border border-slate-800 text-[11px]">
                       <button
                         onClick={() => setTaskTierFilter('unlocked')}
                         className={`px-2 py-0.5 rounded transition-all font-bold ${
@@ -803,7 +855,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           onTouchStart={() => isReorderable && handleTouchStartTask(tk.id)}
                           onTouchMove={handleTouchMoveTask}
                           onTouchEnd={handleTouchEndTask}
-                          className={`p-3 rounded-lg border transition-all duration-200 flex items-start justify-between gap-2 select-none ${
+                          className={`arc-settings-task-card p-3 rounded-lg border transition-all duration-200 flex items-start justify-between gap-2 select-none ${
                             !isUnlocked
                               ? 'bg-slate-950/80 border-slate-800/80 opacity-50 cursor-not-allowed'
                               : isDraggingThis
@@ -1003,11 +1055,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* Avatar Choose: Premium Purchased Skins (Golden Border) & Standard Avatars */}
+              {/* Purchased Premium Skins */}
               {(() => {
                 const ownedSkins = AVAILABLE_SKINS.filter(
                   (s) => appState.ownedSkinIds?.includes(s.id) && s.avatarUrl
                 );
+                if (ownedSkins.length === 0) return null;
                 return (
                   <div className="pt-3 border-t border-slate-800 space-y-4">
                     {/* Premium Skins Section with Gold Frame */}
@@ -1036,7 +1089,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     ? 'border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.9)] scale-105 bg-amber-500/30 ring-2 ring-amber-400/60'
                                     : 'border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)] bg-slate-900 hover:border-amber-300 hover:scale-105'
                                 }`}
-                                title={`${translateSkinName(skin, lang)} (${skin.skinCategory})`}
+                                title={`${translateSkinName(skin, lang)} (${skin.tier})`}
                               >
                                 <div className="w-full h-16 rounded-lg overflow-hidden bg-slate-950 relative border border-amber-500/40">
                                   <img
@@ -1060,66 +1113,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     )}
 
-                    {/* Standard Free Avatars */}
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 mb-2">
-                        {lang === 'en' ? 'Free Standard Avatars' : 'Kostenlose Standard-Profilbilder'}
-                      </label>
-                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-40 overflow-y-auto">
-                        {AVATAR_PRESETS.map((av) => (
-                          <div
-                            key={av.id}
-                            onClick={() => setProfile({ ...profile, avatarUrl: av.url })}
-                            className={`cursor-pointer rounded-xl overflow-hidden border transition-all ${
-                              profile.avatarUrl === av.url
-                                ? 'border-cyan-400 ring-2 ring-cyan-400/50 scale-105'
-                                : 'border-slate-800 opacity-60 hover:opacity-100 hover:border-slate-700'
-                            }`}
-                          >
-                            <img
-                              src={av.url}
-                              alt={av.name}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-14 object-cover"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   </div>
                 );
               })()}
 
-              {/* Avatar Ranking Frame Toggle */}
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                <div>
-                  <label className="block text-xs font-bold text-slate-200">
-                    {lang === 'en' ? 'Show Ranking Profile Frame' : 'Ranking-Profilrahmen Anzeigen'}
-                  </label>
-                  <p className="text-[10px] text-slate-400">
-                    {lang === 'en'
-                      ? 'Enables special reward frames (Rank 1 = Purple + Flame, Top 10% = Gold, Top 20% = Silver).'
-                      : 'Aktiviert die speziellen Belohnungsrahmen (Platz 1 = Lila + Flamme, Top 10% = Gold, Top 20% = Silber).'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setProfile({ ...profile, showAvatarFrame: profile.showAvatarFrame === false ? true : false })
-                  }
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors border shrink-0 ${
-                    profile.showAvatarFrame !== false
-                      ? 'bg-cyan-600 border-cyan-400'
-                      : 'bg-slate-800 border-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      profile.showAvatarFrame !== false ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -1128,7 +1125,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {activeTab === 'motivation' && (
           <div className="space-y-4 overflow-y-auto pr-1 flex-1">
             <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="arc-settings-quote-heading flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-cyan-400 uppercase tracking-wide">
                     {lang === 'en' ? 'Configure Quote Sources' : 'Zitate-Quelle Konfigurieren'}
@@ -1264,38 +1261,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {ALL_EXTRA_MODULES.map((mod) => {
                   const isSel = selectedModules.includes(mod.id);
-                  const moduleTitleMap: Record<string, { en: string; de: string }> = {
-                    motivation: { en: 'Motivational Quotes', de: 'Motivationssprüche' },
-                    business_ideas: { en: 'Business Ideas', de: 'Business-Ideen' },
-                    books: { en: 'Book Recommendations', de: 'Bücher Empfehlungen' },
-                    biohacking: { en: 'Biohacking Protocols', de: 'Biohacking Protocols' },
-                    stoic_rules: { en: 'Stoic Rules', de: 'Stoische Regeln' },
-                  };
-                  const moduleDescMap: Record<string, { en: string; de: string }> = {
-                    motivation: {
-                      en: 'Daily dose of unwavering discipline & mindset protocols.',
-                      de: 'Tägliche Dosis unerschütterliche Disziplin & Mindset-Protokolle.',
-                    },
-                    business_ideas: {
-                      en: 'Scalable business models, SaaS concepts & high-income skills.',
-                      de: 'Skalierbare Geschäftsmodelle, SaaS-Konzepte & High-Income-Skills.',
-                    },
-                    books: {
-                      en: 'The 150 most important works for entrepreneurship, mindset, finance & strength.',
-                      de: 'Die 150 wichtigsten Werke für Unternehmertum, Mindset, Finanzen & Stärke.',
-                    },
-                    biohacking: {
-                      en: 'Sleep optimization, light exposure, dopamine fasting & recovery.',
-                      de: 'Schlafoptimierung, Lichtexposition, Dopamin-Fasten & Erholung.',
-                    },
-                    stoic_rules: {
-                      en: 'Iron maxims for emotional control & resilience.',
-                      de: 'Eiserne Maximen zur emotionalen Kontrolle & Resilienz.',
-                    },
-                  };
-
-                  const titleText = moduleTitleMap[mod.id]?.[lang === 'en' ? 'en' : 'de'] || mod.title;
-                  const descText = moduleDescMap[mod.id]?.[lang === 'en' ? 'en' : 'de'] || mod.description;
+                  const localizedModule = getLocalizedModuleConfig(mod, lang);
 
                   return (
                     <div
@@ -1310,9 +1276,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="flex items-start space-x-2.5">
                         <span className="text-xl mt-0.5">{mod.icon}</span>
                         <div>
-                          <div className="text-xs font-bold text-slate-100">{titleText}</div>
+                          <div className="text-xs font-bold text-slate-100">{localizedModule.title}</div>
                           <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
-                            {descText}
+                            {localizedModule.description}
                           </div>
                         </div>
                       </div>
@@ -1322,172 +1288,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }`}
                       >
                         {isSel && <Check className="w-3 h-3 stroke-[3]" />}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 5: DESIGN & ANIMATIONEN */}
-        {activeTab === 'design' && (
-          <div className="flex-1 overflow-y-auto pr-2 space-y-6">
-            {/* Section 1: Color Customizer */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center space-x-2">
-                  <Palette className="w-5 h-5 text-cyan-400" />
-                  <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">
-                    {lang === 'en' ? 'Interface Color Customizer (Design Palette)' : 'Interface Farbveränderungen (Design Palette)'}
-                  </h3>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">
-                    {lang === 'en' ? 'Max. 3 Colors' : 'Max. 3 Farben'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onToggleDesignColor && onToggleDesignColor('RESET_STANDARD')}
-                    className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-cyan-950/80 hover:bg-cyan-900/90 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all active:scale-95 shadow-sm"
-                    title={lang === 'en' ? 'Reset to default design (Neon Cyan)' : 'Zurück zum ursprünglichen Standard-Design (Neon Cyan)'}
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                    <span>{lang === 'en' ? 'Select Default Design' : 'Standard-Design wählen'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-xs text-slate-400">
-                  {lang === 'en'
-                    ? 'Choose your unlocked interface colors (up to 3 simultaneously). The original default design (Neon Cyan) is always free and can be reactivated at any time.'
-                    : 'Wähle deine freigeschalteten Interface-Farben aus (bis zu 3 gleichzeitig). Das ursprüngliche Standard-Design (Neon Cyan) ist immer gratis verfügbar und lässt sich jederzeit wieder aktivieren.'}
-                </p>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {INTERFACE_COLOR_PALETTE.map((col) => {
-                    const isUnlocked = col.hex === '#06b6d4' || col.price === 0 || (appState.unlockedDesignColors || []).includes(col.hex);
-                    const isSelected = (appState.selectedDesignColors || []).includes(col.hex);
-                    const selectedIdx = (appState.selectedDesignColors || []).indexOf(col.hex);
-
-                    return (
-                      <div
-                        key={col.id}
-                        onClick={() => {
-                          if (isUnlocked) {
-                            if (onToggleDesignColor) onToggleDesignColor(col.hex);
-                          } else {
-                            if (onOpenShopWithTab) onOpenShopWithTab('design');
-                          }
-                        }}
-                        className={`p-3 rounded-xl border cursor-pointer transition-all bg-slate-950 relative flex flex-col items-center justify-center space-y-1.5 ${
-                          isSelected
-                            ? 'border-cyan-400 bg-cyan-950/30 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
-                            : isUnlocked
-                            ? 'border-slate-800 hover:border-cyan-500/50'
-                            : 'border-slate-800 opacity-60 hover:opacity-80'
-                        }`}
-                      >
-                        {isSelected && (
-                          <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-cyan-400 text-slate-950 text-[9px] font-black flex items-center justify-center">
-                            #{selectedIdx + 1}
-                          </div>
-                        )}
-
-                        {!isUnlocked && (
-                          <div className="absolute top-1.5 right-1.5 p-1 rounded bg-slate-900 border border-slate-700 text-amber-400">
-                            <Lock className="w-3 h-3" />
-                          </div>
-                        )}
-
-                        <div
-                          className="w-9 h-9 rounded-lg border border-slate-700 shadow"
-                          style={{ backgroundColor: col.hex }}
-                        />
-                        <span className="text-[11px] font-bold text-slate-200 text-center leading-tight">
-                          {lang === 'en' && (col as any).nameEn ? (col as any).nameEn : col.name}
-                        </span>
-                        {col.hex === '#06b6d4' ? (
-                          <span className="text-[9px] text-cyan-400 font-bold bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
-                            {lang === 'en' ? 'Default' : 'Standard'}
-                          </span>
-                        ) : isUnlocked ? (
-                          <span className="text-[9px] text-emerald-400 font-bold">
-                            {lang === 'en' ? 'Unlocked' : 'Freigeschaltet'}
-                          </span>
-                        ) : (
-                          <span className="text-[9px] text-amber-400 font-bold">100 Cr (Shop)</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Section 2: Animations */}
-            <div className="space-y-3 pt-2 border-t border-slate-800">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <div className="flex items-center space-x-2">
-                  <Film className="w-5 h-5 text-purple-400" />
-                  <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">
-                    {lang === 'en' ? 'Interface Background Animations' : 'Interface Hintergrund-Animationen'}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {UI_ANIMATION_OPTIONS.map((anim) => {
-                  const isPurchased = (appState.purchasedAnimationIds || []).includes(anim.id);
-                  const isEquipped = appState.equippedAnimationId === anim.id;
-
-                  const animName = lang === 'en' && (anim as any).nameEn ? (anim as any).nameEn : anim.name;
-                  const animComplexity = lang === 'en' && (anim as any).complexityEn ? (anim as any).complexityEn : anim.complexity;
-                  const animDesc = lang === 'en' && (anim as any).descriptionEn ? (anim as any).descriptionEn : anim.description;
-
-                  return (
-                    <div
-                      key={anim.id}
-                      className={`p-3 rounded-xl border transition-all bg-slate-950 flex items-center justify-between ${
-                        isEquipped
-                          ? 'border-purple-400 bg-purple-950/20 shadow-[0_0_12px_rgba(168,85,247,0.2)]'
-                          : isPurchased
-                          ? 'border-emerald-500/50 bg-emerald-950/10'
-                          : 'border-slate-800 opacity-60'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-xs font-bold text-slate-100">{animName}</span>
-                          <span className="text-[9px] text-purple-300 bg-purple-950 px-1.5 py-0.5 rounded border border-purple-500/30">
-                            {animComplexity}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{animDesc}</p>
-                      </div>
-
-                      <div className="shrink-0 ml-3">
-                        {isPurchased ? (
-                          <button
-                            onClick={() => onEquipAnimation && onEquipAnimation(anim.id)}
-                            className={`py-1.5 px-3 rounded-lg text-xs font-bold uppercase transition-all ${
-                              isEquipped
-                                ? 'bg-purple-500 text-slate-950 shadow-[0_0_10px_rgba(168,85,247,0.3)]'
-                                : 'bg-slate-800 text-slate-200 hover:bg-purple-950 hover:text-purple-300'
-                            }`}
-                          >
-                            {isEquipped ? (lang === 'en' ? 'Active' : 'Aktiv') : (lang === 'en' ? 'Activate' : 'Aktivieren')}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => onOpenShopWithTab && onOpenShopWithTab('animations')}
-                            className="py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold uppercase tracking-wider"
-                          >
-                            {anim.price} Cr (Shop)
-                          </button>
-                        )}
                       </div>
                     </div>
                   );
@@ -1535,7 +1335,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
         )}
-        <div className="mt-5 flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+        {activeTab === 'data' && (
+          <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+            <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+              <h3 className="text-sm font-bold text-cyan-300">{lang === 'en' ? 'Device-only progress' : 'Fortschritt auf diesem Gerät'}</h3>
+              <p className="text-slate-300 leading-relaxed">{lang === 'en'
+                ? 'ARC stores your profile and gameplay progress only on this device. There is currently no cloud sync. Uninstalling ARC, clearing app data or losing the device can remove progress, so keep a current backup.'
+                : 'ARC speichert dein Profil und deinen Spielfortschritt nur auf diesem Gerät. Es gibt derzeit keine Cloud-Synchronisierung. Beim Deinstallieren, Löschen der App-Daten oder Verlust des Geräts kann Fortschritt verloren gehen – bewahre daher ein aktuelles Backup auf.'}</p>
+              <p className="text-slate-400 leading-relaxed">{lang === 'en'
+                ? 'Consumed ARC Credit packs are recorded locally and may not be restorable after local data is lost.'
+                : 'Verbrauchte ARC-Credit-Pakete werden lokal erfasst und können nach Verlust lokaler Daten möglicherweise nicht wiederhergestellt werden.'}</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={dataAction !== null} onClick={() => void handleExportBackup()} className="min-h-11 px-4 py-2 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-200 flex items-center gap-2"><Download className="w-4 h-4" />{lang === 'en' ? 'Export backup' : 'Backup exportieren'}</button>
+                <button type="button" disabled={dataAction !== null} onClick={() => importInputRef.current?.click()} className="min-h-11 px-4 py-2 rounded bg-slate-800 border border-slate-700 text-slate-200 flex items-center gap-2"><Upload className="w-4 h-4" />{lang === 'en' ? 'Import backup' : 'Backup importieren'}</button>
+                <input ref={importInputRef} type="file" className="sr-only" accept=".arcbackup,application/json" onChange={(event) => { const file=event.target.files?.[0]; if(file) void handleImportFile(file); }} />
+              </div>
+              {dataMessage && <p role="status" className="text-cyan-200">{dataMessage}</p>}
+            </section>
+            <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+              <h3 className="text-sm font-bold text-amber-300">{lang === 'en' ? 'Virtual currency & purchases' : 'Virtuelle Währung & Käufe'}</h3>
+              <p className="text-slate-300 leading-relaxed">{lang === 'en'
+                ? 'ARC Credits are virtual in-app currency with no cash value and cannot be transferred to other users or companion apps. Paid credit packs are consumable. Apple or Google provides the current store price and governs payment handling and applicable refunds. Restoration is limited once credits have been consumed locally.'
+                : 'ARC Credits sind eine virtuelle In-App-Währung ohne Geldwert und können nicht an andere Personen oder Begleit-Apps übertragen werden. Bezahlte Credit-Pakete sind Verbrauchsgüter. Apple oder Google zeigt den aktuellen Store-Preis an und regelt Zahlungsabwicklung sowie anwendbare Erstattungen. Nach lokalem Verbrauch ist eine Wiederherstellung nur eingeschränkt möglich.'}</p>
+            </section>
+            <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+              <h3 className="text-sm font-bold text-emerald-300">{lang === 'en' ? 'Privacy summary' : 'Datenschutz-Kurzinfo'}</h3>
+              <p className="text-slate-300 leading-relaxed">{lang === 'en'
+                ? 'ARC has no developer account or login and does not send profile or gameplay data to an ARC backend. Apple/Google billing contacts the platform store during purchases. This build contains no ads, analytics or tracking.'
+                : 'ARC hat kein Entwicklerkonto und keinen Login und sendet Profil- oder Spieldaten nicht an ein ARC-Backend. Apple-/Google-Abrechnung kommuniziert bei Käufen mit dem Plattform-Store. Dieser Build enthält keine Werbung, Analysen oder Tracking.'}</p>
+              <div className="flex flex-wrap gap-3 pt-1">
+                {([['privacy','Privacy Policy','Datenschutzerklärung'],['support','Support / Contact','Support / Kontakt'],['terms','Terms of Use','Nutzungsbedingungen'],['imprint','Legal Notice','Impressum']] as const).map(([key,en,de]) => ARC_RELEASE_LINKS[key] ? <a key={key} href={ARC_RELEASE_LINKS[key]!} target="_blank" rel="noreferrer" className="text-cyan-300 underline inline-flex items-center gap-1">{lang === 'en'?en:de}<ExternalLink className="w-3 h-3" /></a> : null)}
+              </div>
+            </section>
+            <section className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 space-y-2">
+              <h3 className="text-sm font-bold text-rose-300">{lang === 'en' ? 'Reset local progress' : 'Lokalen Fortschritt zurücksetzen'}</h3>
+              <p className="text-slate-300">{lang === 'en' ? 'This permanently replaces the current character and its local progress. Export a backup first.' : 'Dies ersetzt den aktuellen Charakter und seinen lokalen Fortschritt dauerhaft. Exportiere vorher ein Backup.'}</p>
+              <button type="button" onClick={onRequestReset} className="min-h-11 px-4 py-2 rounded border border-rose-500/50 text-rose-200">{lang === 'en' ? 'Reset character…' : 'Charakter zurücksetzen…'}</button>
+            </section>
+          </div>
+        )}
+        </div>
+        {activeTab !== 'data' && <div className="arc-settings-footer mt-5 flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
           {saveError && <p className="mr-auto text-xs text-red-400">{saveError}</p>}
           <button
             onClick={onClose}
@@ -1556,12 +1396,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 : (lang === 'en' ? 'SAVE CHANGES' : 'ÄNDERUNGEN SPEICHERN')}
             </span>
           </button>
-        </div>
+        </div>}
 
         {/* Task Creation Modal Popup */}
         {isAddingTaskModalOpen && currentActiveStat && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-            <div className="relative w-full max-w-md bg-slate-900 border border-cyan-500/40 rounded-xl p-5 shadow-2xl space-y-4">
+          <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+            <div className="arc-modal relative w-full max-w-md bg-slate-900 border border-cyan-500/40 rounded-xl p-5 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-xs font-bold text-cyan-400 uppercase">
                   {lang === 'en' ? `New Task for ${translateStatName(currentActiveStat.name, 'en')}` : `Neue Aufgabe für ${currentActiveStat.name}`}

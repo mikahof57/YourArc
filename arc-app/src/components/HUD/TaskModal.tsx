@@ -3,6 +3,7 @@ import { StatAttribute, TaskItem } from '../../types';
 import { X, CheckCircle, Target } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Language, t, translateStatName } from '../../utils/i18n';
+import { useModalAccessibility } from '../../hooks/useModalAccessibility';
 
 interface TaskModalProps {
   stat: StatAttribute;
@@ -13,6 +14,33 @@ interface TaskModalProps {
   assignmentKind?: 'normal' | 'restday';
   restdayOptions?: Array<{ key: string; title: string }>;
   onMarkDone: (statId: string, choiceKey?: string | null) => Promise<void> | void;
+}
+
+function getCompletionErrorMessage(error: unknown, lang: Language): string {
+  let rawMessage = '';
+  if (error instanceof Error) {
+    rawMessage = error.message;
+  } else if (error !== null && typeof error === 'object') {
+    const message = Reflect.get(error, 'message');
+    if (typeof message === 'string') rawMessage = message;
+  }
+
+  if (/not_authenticated|jwt|auth/i.test(rawMessage)) {
+    return lang === 'de' ? 'Bitte melde dich erneut an.' : 'Please sign in again.';
+  }
+  if (/engine_not_initialized|engine_not_started|progress_not_initialized/i.test(rawMessage)) {
+    return lang === 'de' ? 'Dein ARC-Fortschritt ist noch nicht initialisiert.' : 'Your ARC progression is not initialized yet.';
+  }
+  if (/assignment_not_today/i.test(rawMessage)) {
+    return lang === 'de' ? 'Diese Aufgabe gehört nicht mehr zum aktuellen ARC-Tag. Bitte neu laden.' : 'This task is no longer part of the current ARC day. Please reload.';
+  }
+  if (/assignment_not_found|stat_not_active|choice_not_allowed|choice_invalid/i.test(rawMessage)) {
+    return lang === 'de' ? 'Diese Aufgabe ist nicht mehr gültig. Bitte neu laden.' : 'This task is no longer valid. Please reload.';
+  }
+  if (/fetch|network|offline|timeout|failed to connect/i.test(rawMessage)) {
+    return lang === 'de' ? 'Die lokale Aufgabe konnte nicht gespeichert werden. Es wurde kein Fortschritt verändert.' : 'The local task could not be saved. No progress was changed.';
+  }
+  return lang === 'de' ? 'Aufgabe konnte nicht abgeschlossen werden.' : 'Could not complete this task.';
 }
 
 export const TaskModal: React.FC<TaskModalProps> = ({
@@ -28,6 +56,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [selectedChoiceKey, setSelectedChoiceKey] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const dialogRef = useModalAccessibility<HTMLDivElement>(onClose);
 
   useEffect(() => {
     setSelectedChoiceKey(null);
@@ -59,15 +88,15 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       onClose();
     } catch (error) {
       console.error('Could not complete daily assignment:', error);
-      setSubmitError(lang === 'de' ? 'Aufgabe konnte nicht abgeschlossen werden.' : 'Could not complete this task.');
+      setSubmitError(getCompletionErrorMessage(error, lang === 'de' ? 'de' : 'en'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn font-mono">
-      <div className="relative w-full max-w-md bg-slate-900 border-2 border-cyan-500/40 rounded-xl p-5 sm:p-6 shadow-[0_0_50px_rgba(0,240,255,0.2)]">
+    <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn font-mono">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="arc-task-title" className="arc-modal relative w-full max-w-md bg-slate-900 border-2 border-cyan-500/40 rounded-xl p-5 sm:p-6 shadow-[0_0_50px_rgba(0,240,255,0.2)]">
         {/* Futuristic Corner accents */}
         <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl" />
         <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
@@ -77,6 +106,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         {/* Close Button Top Right */}
         <button
           onClick={onClose}
+          aria-label={t('close', lang)}
           className="absolute top-3 right-3 p-1 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition-all border border-transparent hover:border-cyan-500/30"
           title={t('close', lang)}
         >
@@ -84,7 +114,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         </button>
 
         {/* Header */}
-        <div className="flex items-center space-x-3 mb-4 pr-6">
+        <div className="arc-task-briefing flex items-center space-x-3 mb-4 pr-6">
           <div className="w-10 h-10 rounded-lg bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-2xl shadow-[0_0_10px_rgba(0,240,255,0.2)]">
             {stat.emoji}
           </div>
@@ -92,7 +122,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             <span className="text-[10px] text-cyan-400 uppercase tracking-widest block">
               {t('statValue', lang)} // {translateStatName(stat.name, lang)}
             </span>
-            <h3 className="text-base font-bold text-slate-100">{task.title}</h3>
+            <h3 id="arc-task-title" className="text-base font-bold text-slate-100">{task.title}</h3>
           </div>
         </div>
 

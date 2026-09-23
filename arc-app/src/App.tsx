@@ -3,17 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { AppState, ArcDailyPayload, StatAttribute, TaskItem, BottomBarModuleConfig, UserAuthAccount, UserProfile } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { AppState, StatAttribute, TaskItem, BottomBarModuleConfig, UserProfile } from './types';
 import {
-  loadAppState,
-  saveAppState,
+  getInitialState,
   getRandomQuote,
   getTodayDateString,
 } from './utils/storage';
-import { Language, getStoredLanguage, setStoredLanguage, t } from './utils/i18n';
+import { Language, getStoredLanguage } from './utils/i18n';
 import { ALL_EXTRA_MODULES } from './data/extraModules';
+import { getLocalizedModuleConfig } from './data/extraModulesTranslations';
 import { DEFAULT_STATS } from './data/defaultStats';
+import { DEFAULT_AVATAR_URL } from './data/avatars';
 
 import { CyberHeader } from './components/CyberHeader';
 import { CharacterCreation } from './components/Onboarding/CharacterCreation';
@@ -25,64 +26,25 @@ import { WeeklyRoutineWidget } from './components/HUD/WeeklyRoutineWidget';
 import { CalendarWidget } from './components/HUD/CalendarWidget';
 import { BottomBar } from './components/HUD/BottomBar';
 
+import { AppIntroduction } from './components/Onboarding/AppIntroduction';
+import { shouldShowIntroduction, dismissIntroduction } from './features/introduction/introductionPolicy';
 import { SettingsModal } from './components/Modals/SettingsModal';
 import { StatsGraphModal } from './components/Modals/StatsGraphModal';
 import { ExtraModuleModal } from './components/Modals/ExtraModuleModal';
-import { CommunityModal } from './components/Modals/CommunityModal';
 import { ShopModal } from './components/Modals/ShopModal';
-import { AuthModal } from './components/Modals/AuthModal';
-import { ChatWindow } from './components/Chat/ChatWindow';
-import { DeletedTasksModal } from './components/Modals/DeletedTasksModal';
-import { Register } from './components/Register';
-import { DeletedTaskItem } from './types';
+import { ArcMenuModal } from './components/Modals/ArcMenuModal';
+import { HomeProgressDeck } from './components/HUD/HomeProgressDeck';
+import { MissionsPage } from './components/Pages/MissionsPage';
+import { initializeLocalSaveFoundation, localEconomyService, localGameService, localObjectivesService, localProfileService, localProgressionService } from './services/localSaveService';
+import { AppHubPage } from './components/Pages/AppHubPage';
 import { BackgroundAnimations } from './components/Effects/BackgroundAnimations';
 import { UserCheck, Shield, X, Loader2 } from 'lucide-react';
-import { InterfaceColorOption, UIAnimationOption } from './data/shopData';
-import { useStore } from './store/useStore';
-import {
-  getMyProfile,
-  updateMyProfile,
-  loadFriends,
-  loadFriendRequests,
-  loadClans,
-  loadClanInvitations,
-  loadOwnedInventory,
-  purchaseStoreItem,
-  claimDailyWheel,
-  setOnlineStatus,
-  spendCredits,
-} from './services/communityService';
-import { startCreditCheckout } from './services/paymentService';
-import {
-  completeArcDailyAssignment,
-  getArcRestdayOptions,
-  getCompletedArcStatIds,
-  initializeArcCharacter,
-  loadArcDailyProgression,
-  mapArcAssignmentToTaskItem,
-  mapArcHistoryToUiHistory,
-  mapArcPayloadToUiStats,
-  resetArcCharacter,
-} from './services/progressionService';
-
-function applyArcProgression(prev: AppState, progression: ArcDailyPayload): AppState {
-  return {
-    ...prev,
-    stats: mapArcPayloadToUiStats(progression, prev.stats),
-    completedTasksToday: getCompletedArcStatIds(progression.assignments),
-    history: mapArcHistoryToUiHistory(progression),
-    arcAssignments: progression.assignments,
-    arcDay: progression.arc_day,
-    arcTimezone: progression.timezone,
-    lastActiveDate: progression.arc_day,
-    consecutiveLoginDays: progression.login_streak,
-    lifetimeXp: progression.lifetime_xp,
-    level: progression.level,
-    currentLevelXp: progression.current_level_xp,
-    requiredLevelXp: progression.required_level_xp,
-    statStreaks: Object.fromEntries(progression.stats.map((stat) => [stat.stat_id, stat.stat_streak])),
-  };
-}
+import { getLocalRestdayOptions, mapLocalAssignmentToTaskItem, projectSaveToAppState } from './features/runtime/localGameService';
+import { ARC_CANONICAL_STAT_IDS, type ArcCanonicalStatId } from './features/savegame/arcSaveGame';
+import { getLocalizedTitleName } from './features/achievements/achievementLocalization';
+import { nativeRuntimeService } from './services/nativeRuntimeService';
+import { localIapService } from './services/localIapService';
+import { importLocalArcBackup, shareOrDownloadArcBackup } from './services/localBackupService';
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -93,274 +55,119 @@ function getErrorMessage(error: unknown): string {
   return String(error ?? '');
 }
 
-const DEFAULT_PROFILE_AVATAR_URL =
-  'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80';
-
-function createFirstTimeProfileDraft(serverProfile: Awaited<ReturnType<typeof getMyProfile>>): UserProfile {
-  const serverGender = serverProfile?.gender;
+function createFirstTimeProfileDraft(localProfile: UserProfile | null): UserProfile {
+  const localGender = localProfile?.gender;
   return {
-    name: serverProfile?.name ?? '',
-    gender: serverGender === 'f' || serverGender === 'd' ? serverGender : 'm',
-    avatarUrl: serverProfile?.avatar_url || DEFAULT_PROFILE_AVATAR_URL,
+    name: localProfile?.name ?? '',
+    gender: localGender === 'f' || localGender === 'd' ? localGender : 'm',
+    avatarUrl: localProfile?.avatarUrl && !/^https?:\/\//i.test(localProfile.avatarUrl)
+      ? localProfile.avatarUrl : DEFAULT_AVATAR_URL,
     isCreated: false,
     createdAt: getTodayDateString(),
-    characterCode: serverProfile?.character_code ?? undefined,
+    characterCode: undefined,
   };
 }
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState>(() => loadAppState());
+  const [appState, setAppState] = useState<AppState>(() => getInitialState());
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [lang, setLang] = useState<Language>(() => getStoredLanguage());
   const [arcInitializationStatus, setArcInitializationStatus] = useState<'idle' | 'loading' | 'initialized' | 'missing' | 'error'>('idle');
   const [firstTimeProfileDraft, setFirstTimeProfileDraft] = useState<UserProfile | null>(null);
-  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
-
-  // Store Auth state
-  const user = useStore((state) => state.user);
-  const isAuthInitializing = useStore((state) => state.isAuthInitializing);
-  const initializeAuth = useStore((state) => state.initializeAuth);
-
-  useEffect(() => {
-    initializeAuth();
-  }, [initializeAuth]);
-
-  useEffect(() => {
-    setBlockedUserIds([]);
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (user) {
-      setArcInitializationStatus('loading');
-      (async () => {
-        try {
-          const progressionPromise = loadArcDailyProgression()
-            .then((progression) => ({ progression, error: null }))
-            .catch((error: unknown) => ({ progression: null, error }));
-          const [profile, friends, requests, clans, invitations, inventory, progressionResult] = await Promise.all([
-            getMyProfile(),
-            loadFriends(),
-            loadFriendRequests(),
-            loadClans(),
-            loadClanInvitations(),
-            loadOwnedInventory(),
-            progressionPromise,
-          ]);
-          setAppState((prev) => {
-            const hydrated = progressionResult.progression
-              ? applyArcProgression(prev, progressionResult.progression)
-              : prev;
-            return {
-              ...hydrated,
-              profile: profile
-                ? { ...prev.profile, name: profile.name || prev.profile.name, avatarUrl: profile.avatar_url || prev.profile.avatarUrl, characterCode: profile.character_code, isCreated: true }
-                : prev.profile,
-              credits: profile?.credits ?? prev.credits ?? 0,
-              friends,
-              incomingFriendRequests: requests,
-              clans,
-              clanInvitations: invitations,
-              ownedSkinIds: inventory.filter((i: any) => i.item_type === 'skin').map((i: any) => i.item_id),
-              unlockedDesignColors: ['#06b6d4', ...inventory.filter((i: any) => i.item_type === 'color').map((i: any) => {
-                const colorMap: Record<string,string> = {
-                  color_amber:'#f59e0b', color_emerald:'#10b981', color_purple:'#a855f7',
-                  color_rose:'#f43f5e', color_blue:'#3b82f6', color_silver:'#e2e8f0', color_orange:'#f97316'
-                };
-                return colorMap[i.item_id];
-              }).filter(Boolean)],
-              purchasedAnimationIds: inventory.filter((i: any) => i.item_type === 'animation').map((i: any) => i.item_id),
-              hasUnlockedDesignCustomizer: inventory.some((i: any) => i.item_id === 'design_customizer'),
-              userClan: profile
-                ? clans.find((c) => c.members.some((m) => m.characterCode === profile.character_code)) || null
-                : prev.userClan,
-            };
-          });
-          if (progressionResult.progression) {
-            setFirstTimeProfileDraft(null);
-            setArcInitializationStatus('initialized');
-          } else {
-            const message = getErrorMessage(progressionResult.error);
-            if (message === 'arc_daily_progress_not_initialized') {
-              setFirstTimeProfileDraft(createFirstTimeProfileDraft(profile));
-              setArcInitializationStatus('missing');
-            } else {
-              console.error('Failed to hydrate ARC progression:', progressionResult.error);
-              setArcInitializationStatus('error');
-            }
-          }
-        } catch (error) {
-          console.error('Failed to hydrate ARC backend state:', error);
-          setArcInitializationStatus('error');
-        }
-      })();
-    } else {
-      setFirstTimeProfileDraft(null);
-      setArcInitializationStatus('idle');
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    setOnlineStatus(true).catch((error) => console.error('Could not set online status:', error));
-    const markOffline = () => {
-      // Best effort on tab close; normal reconnects set the state back to online.
-      setOnlineStatus(false).catch(() => undefined);
-    };
-    window.addEventListener('beforeunload', markOffline);
-    return () => {
-      window.removeEventListener('beforeunload', markOffline);
-      setOnlineStatus(false).catch(() => undefined);
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user || typeof window === 'undefined') return;
-    const payment = new URLSearchParams(window.location.search).get('payment');
-    if (payment !== 'success') return;
-    const refreshCredits = async () => {
-      try {
-        // Stripe webhook is authoritative; refresh after a short delay to allow the webhook to settle.
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        const profile = await getMyProfile();
-        if (profile) setAppState((prev) => ({ ...prev, credits: profile.credits ?? 0 }));
-      } catch (error) {
-        console.error('Could not refresh credits after payment:', error);
-      } finally {
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    };
-    refreshCredits();
-  }, [user]);
-
-  const handleSetLanguage = (newLang: Language) => {
-    setLang(newLang);
-    setStoredLanguage(newLang);
-  };
-
-  // Modals state
+  const [equippedAchievementTitle, setEquippedAchievementTitle] = useState<string | null>(null);
   const [selectedStatForTask, setSelectedStatForTask] = useState<StatAttribute | null>(null);
+  const [introductionMode, setIntroductionMode] = useState<'automatic' | 'replay' | null>(null);
+  const finishIntroduction = useCallback(async () => {
+    if (!introductionMode) return;
+    await dismissIntroduction(introductionMode, () => localProfileService.updateSettings({ introductionState: 'completed' }));
+    setIntroductionMode(null);
+  }, [introductionMode]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isGraphOpen, setIsGraphOpen] = useState<boolean>(false);
   const [activeExtraModule, setActiveExtraModule] = useState<BottomBarModuleConfig | null>(null);
   const [isConfirmNewCharOpen, setIsConfirmNewCharOpen] = useState<boolean>(false);
   const [isResettingCharacter, setIsResettingCharacter] = useState<boolean>(false);
   const [characterResetError, setCharacterResetError] = useState<string | null>(null);
-  const [isCommunityOpen, setIsCommunityOpen] = useState<boolean>(false);
-  const [isShopOpen, setIsShopOpen] = useState<boolean>(false);
-  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
-  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
-  const [isDeletedTasksOpen, setIsDeletedTasksOpen] = useState<boolean>(false);
-  const [shopInitialTab, setShopInitialTab] = useState<'wheel' | 'exchange' | 'marketplace' | 'design' | 'animations'>('marketplace');
+  const [activeDestination, setActiveDestination] = useState<'home' | 'missions' | 'appHub' | 'shop'>('home');
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }); }, [activeDestination]);
+  const [objectiveInitialView, setObjectiveInitialView] = useState<'missions' | 'achievements'>('missions');
+  const [isArcMenuOpen, setIsArcMenuOpen] = useState(false);
+  const [homeDetailSurface, setHomeDetailSurface] = useState<'routine' | 'calendar' | null>(null);
+  const handleMissionCreditBalance = useCallback((balance: number) => {
+    setAppState((previous) => previous.credits === balance ? previous : { ...previous, credits: balance });
+  }, []);
+  const loadIapProducts = useCallback(() => localIapService.loadProducts(lang), [lang]);
+  const purchaseIapProduct = useCallback(async (productId: string) => {
+    const outcome = await localIapService.purchase(productId);
+    if (outcome.state === 'success') setAppState((previous) => projectSaveToAppState(outcome.save, previous));
+    return outcome;
+  }, []);
 
-  // Server-authoritative shop handlers. The browser only requests an item purchase;
-  // Supabase decides the price, checks the balance, and records the transaction.
-  const handleUnlockDesignCustomizer = async () => {
-    try {
-      const newBalance = await purchaseStoreItem('design_customizer');
-      playSoundEffect('levelup');
-      setAppState((prev) => ({ ...prev, credits: newBalance, hasUnlockedDesignCustomizer: true }));
-      return true;
-    } catch (error) {
-      console.error('Design customizer purchase failed:', error);
-      return false;
-    }
-  };
-
-  const handleToggleDesignColor = (colorHex: string) => {
-    playSoundEffect('click');
-    setAppState((prev) => {
-      if (colorHex === 'RESET_STANDARD') return { ...prev, selectedDesignColors: ['#06b6d4'] };
-      const current = prev.selectedDesignColors || [];
-      let updated: string[];
-      if (current.includes(colorHex)) {
-        updated = current.filter((c) => c !== colorHex);
-        if (updated.length === 0) updated = ['#06b6d4'];
-      } else {
-        updated = current.length >= 3 ? [...current.slice(1), colorHex] : [...current, colorHex];
-      }
-      return { ...prev, selectedDesignColors: updated };
-    });
-  };
-
-  const handleBuyColor = async (color: InterfaceColorOption) => {
-    try {
-      const newBalance = await purchaseStoreItem(color.id);
-      playSoundEffect('levelup');
-      setAppState((prev) => ({
-        ...prev,
-        credits: newBalance,
-        unlockedDesignColors: [...new Set([...(prev.unlockedDesignColors || ['#06b6d4']), color.hex])],
-        selectedDesignColors: [...new Set([...(prev.selectedDesignColors || ['#06b6d4']), color.hex])].slice(-3),
-      }));
-      return true;
-    } catch (error) {
-      console.error('Color purchase failed:', error);
-      return false;
-    }
-  };
-
-  const handleBuyAnimation = async (anim: UIAnimationOption) => {
-    try {
-      const newBalance = await purchaseStoreItem(anim.id);
-      playSoundEffect('levelup');
-      setAppState((prev) => ({
-        ...prev,
-        credits: newBalance,
-        purchasedAnimationIds: [...new Set([...(prev.purchasedAnimationIds || []), anim.id])],
-        equippedAnimationId: anim.id,
-      }));
-      return true;
-    } catch (error) {
-      console.error('Animation purchase failed:', error);
-      return false;
-    }
-  };
-
-  const handleEquipAnimation = (animId: string) => {
-    playSoundEffect('click');
-    setAppState((prev) => ({ ...prev, equippedAnimationId: prev.equippedAnimationId === animId ? '' : animId }));
-  };
-
-  // Task Restoration Handler
-  const handleRestoreTask = (taskToRestore: DeletedTaskItem) => {
-    playSoundEffect('complete');
-    setAppState((prev) => {
-      const newDeletedTasks = (prev.deletedTasks || []).filter((t) => t.id !== taskToRestore.id);
-
-      const restoredTask: TaskItem = {
-        id: taskToRestore.id,
-        title: taskToRestore.title,
-        description: taskToRestore.description,
-        order: 99,
-        tier: taskToRestore.tier,
-        isCustom: taskToRestore.isCustom,
-      };
-
-      const updatedStats = prev.stats.map((s) => {
-        if (s.id === taskToRestore.statId) {
-          const exists = s.tasks.some((t) => t.id === restoredTask.id);
-          if (!exists) {
-            return {
-              ...s,
-              tasks: [...s.tasks, restoredTask],
-            };
-          }
-        }
-        return s;
-      });
-
-      return {
-        ...prev,
-        stats: updatedStats,
-        deletedTasks: newDeletedTasks,
-      };
-    });
-  };
-
-  // Save changes to local storage whenever appState updates
   useEffect(() => {
-    saveAppState(appState);
-  }, [appState]);
+    let cancelled = false;
+    setArcInitializationStatus('loading');
+    void (async () => {
+      try {
+        const initialized = await initializeLocalSaveFoundation(lang);
+        if (initialized.warnings.length) console.warn('ARC local save recovery warnings:', initialized.warnings);
+        const save = initialized.save.progression.initializedAt
+          ? await localGameService.initializeDay()
+          : initialized.save;
+        if (cancelled) return;
+        const saveLanguage = save.settings.language;
+        setLang(saveLanguage);
+        setAppState((previous) => projectSaveToAppState(save, previous));
+        setFirstTimeProfileDraft(save.progression.initializedAt ? null : createFirstTimeProfileDraft(save.profile));
+        setArcInitializationStatus(save.progression.initializedAt ? 'initialized' : 'missing');
+        if (shouldShowIntroduction(save)) setIntroductionMode('automatic');
+        const title = save.titles.owned.find((item) => item.title_id === save.titles.equippedTitleId);
+        setEquippedAchievementTitle(title ? getLocalizedTitleName(title.title_id, saveLanguage, title) : null);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('ARC local save could not be loaded or recovered:', error);
+        setArcInitializationStatus('error');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (arcInitializationStatus !== 'initialized') return;
+    let cancelled = false;
+    let stop = () => undefined;
+    const reconcilePurchases = async () => {
+      const outcomes = await localIapService.reconcile();
+      const latest = outcomes.filter((outcome) => outcome.state === 'success').at(-1);
+      if (latest?.state === 'success' && !cancelled) setAppState((previous) => projectSaveToAppState(latest.save, previous));
+    };
+    void reconcilePurchases().catch((error) => console.warn('ARC purchase reconciliation unavailable:', error));
+    void nativeRuntimeService.start(async (save) => {
+      if (cancelled) return;
+      if (save && !cancelled) setAppState((previous) => projectSaveToAppState(save, previous));
+      await reconcilePurchases().catch((error) => console.warn('ARC purchase reconciliation unavailable:', error));
+    }).then((cleanup) => { if (cancelled) cleanup(); else stop = cleanup; });
+    return () => { cancelled = true; stop(); };
+  }, [arcInitializationStatus]);
+
+  const handleSetLanguage = (newLang: Language) => {
+    void localProfileService.updateSettings({ language: newLang }).then((save) => {
+      setLang(newLang);
+      setAppState((previous) => projectSaveToAppState(save, previous));
+    }).catch((error) => console.warn('ARC local language update failed:', error));
+  };
+
+  useEffect(() => {
+    const hydrateAchievements = async () => {
+      const save = await localObjectivesService.load();
+      if (!save) return;
+      const equipped = save.titles.owned.find((title) => title.title_id === save.titles.equippedTitleId);
+      setEquippedAchievementTitle(equipped ? getLocalizedTitleName(equipped.title_id, lang, equipped) : null);
+      handleMissionCreditBalance(save.economy.credits);
+    };
+    void hydrateAchievements().catch(() => undefined);
+    window.addEventListener('arc-title-changed', hydrateAchievements);
+    return () => window.removeEventListener('arc-title-changed', hydrateAchievements);
+  }, [lang, handleMissionCreditBalance]);
 
   // Audio effect synthesizers via Web Audio API
   const playSoundEffect = (type: 'complete' | 'click' | 'levelup') => {
@@ -395,47 +202,31 @@ export default function App() {
 
   // Onboarding completion
   const handleCharacterCreationComplete = async (profile: AppState['profile'], selectedStats: StatAttribute[]) => {
-    if (!user) throw new Error('Authentication is required before ARC initialization.');
-
+    let confirmed: Awaited<ReturnType<typeof localGameService.initializeCharacter>>;
+    const isNewCharacter = arcInitializationStatus === 'missing';
     if (arcInitializationStatus === 'missing') {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      await initializeArcCharacter(
-        { name: profile.name, avatar_url: profile.avatarUrl, gender: profile.gender },
-        selectedStats.map((stat) => ({ stat_id: stat.id, start_value: stat.startValue ?? stat.value })),
+      confirmed = await localGameService.initializeCharacter({
+        profile: {
+          name: profile.name, avatarUrl: profile.avatarUrl, gender: profile.gender,
+          age: profile.age, weight: profile.weight, height: profile.height,
+          avatarCategory: profile.avatarCategory, showAvatarFrame: profile.showAvatarFrame,
+        },
+        stats: selectedStats
+          .filter((stat): stat is StatAttribute & { id: ArcCanonicalStatId } =>
+            ARC_CANONICAL_STAT_IDS.includes(stat.id as ArcCanonicalStatId))
+          .map((stat) => ({ statId: stat.id, startValue: stat.startValue ?? stat.value })),
         timezone,
-      );
+      });
     } else if (arcInitializationStatus === 'initialized') {
-      await updateMyProfile({ name: profile.name, avatarUrl: profile.avatarUrl, gender: profile.gender });
+      confirmed = await localGameService.updateProfile(profile);
     } else {
       throw new Error('ARC progression initialization state is not ready.');
     }
-
-    const [progression, confirmedProfile] = await Promise.all([
-      loadArcDailyProgression(),
-      getMyProfile(),
-    ]);
-    if (!confirmedProfile) throw new Error('The confirmed ARC profile could not be loaded.');
-
-    setAppState((prev) => ({
-      ...applyArcProgression(prev, progression),
-      profile: {
-        ...prev.profile,
-        age: profile.age,
-        weight: profile.weight,
-        height: profile.height,
-        name: confirmedProfile.name,
-        avatarUrl: confirmedProfile.avatar_url,
-        gender: confirmedProfile.gender,
-        characterCode: confirmedProfile.character_code,
-        isCreated: true,
-      },
-    }));
-    useStore.getState().setProfile({
-      name: confirmedProfile.name,
-      avatarUrl: confirmedProfile.avatar_url,
-      gender: confirmedProfile.gender,
-    });
+    setAppState((previous) => projectSaveToAppState(confirmed, previous));
     setArcInitializationStatus('initialized');
+    setActiveDestination('home');
+    if (isNewCharacter && shouldShowIntroduction(confirmed)) setIntroductionMode('automatic');
     playSoundEffect('levelup');
   };
 
@@ -443,47 +234,10 @@ export default function App() {
     setIsResettingCharacter(true);
     setCharacterResetError(null);
     try {
-      const resetResult = await resetArcCharacter();
-      const cleanProfile = {
-        ...createFirstTimeProfileDraft(null),
-        characterCode: resetResult.characterCode,
-      };
+      const reset = await localGameService.resetCharacter();
+      const cleanProfile = createFirstTimeProfileDraft(null);
       setFirstTimeProfileDraft(cleanProfile);
-      setAppState((prev) => ({
-        ...prev,
-        profile: cleanProfile,
-        stats: DEFAULT_STATS,
-        completedTasksToday: [],
-        history: [],
-        friends: [],
-        incomingFriendRequests: [],
-        sentFriendRequestIds: [],
-        declinedRequestsInfo: {},
-        userClan: null,
-        clans: [],
-        clanInvitations: [],
-        sentClanJoinRequestIds: [],
-        statStreaks: {},
-        chatState: { channels: [], clanMessages: [] },
-        deletedTasks: [],
-        consecutiveLoginDays: 0,
-        arcDay: undefined,
-        arcTimezone: undefined,
-        lifetimeXp: 0,
-        level: 1,
-        currentLevelXp: 0,
-        requiredLevelXp: undefined,
-        arcAssignments: [],
-      }));
-      setBlockedUserIds([]);
-      useStore.getState().setProfile({
-        name: '',
-        avatarUrl: cleanProfile.avatarUrl,
-        gender: cleanProfile.gender,
-        characterCode: cleanProfile.characterCode,
-        level: 1,
-        standardPoints: 0,
-      });
+      setAppState((previous) => projectSaveToAppState(reset, previous));
       setIsConfirmNewCharOpen(false);
       setArcInitializationStatus('missing');
     } catch (error) {
@@ -502,35 +256,41 @@ export default function App() {
     playSoundEffect('click');
     setAppState((prev) => {
       const current = prev.collapsedWindows || {};
+      const collapsedWindows = {
+        ...current,
+        [windowKey]: !current[windowKey],
+      };
+      void localProfileService.updateUiPreferences({ collapsedWindows });
       return {
         ...prev,
-        collapsedWindows: {
-          ...current,
-          [windowKey]: !current[windowKey],
-        },
+        collapsedWindows,
       };
     });
   };
 
+  const completionInFlightRef = useRef<Set<string>>(new Set());
+
   const handleMarkTaskDone = async (statId: string, choiceKey: string | null = null) => {
     const assignment = appState.arcAssignments?.find((item) => item.stat_id === statId);
-    if (!assignment) throw new Error('No server daily assignment is available for this stat.');
+    if (!assignment) throw new Error('No local daily assignment is available for this stat.');
     if (assignment.completed_at !== null) return;
+    if (completionInFlightRef.current.has(assignment.assignment_id)) return;
 
-    const result = await completeArcDailyAssignment(assignment.assignment_id, choiceKey);
-    if (!result.confirmed) throw new Error('The server did not confirm this assignment completion.');
-
-    // Completion changes become visible only through a fresh authoritative payload.
-    const progression = await loadArcDailyProgression();
-    setAppState((prev) => applyArcProgression(prev, progression));
-
-    playSoundEffect('complete');
+    completionInFlightRef.current.add(assignment.assignment_id);
+    try {
+      const completed = await localGameService.completeAssignment(assignment.assignment_id, choiceKey);
+      if (!completed.completion.confirmed) throw new Error('The local assignment was not completed.');
+      setAppState((previous) => projectSaveToAppState(completed.save, previous));
+      playSoundEffect('complete');
+    } finally {
+      completionInFlightRef.current.delete(assignment.assignment_id);
+    }
   };
 
   // Active custom bottom bar modules list
-  const activeBottomModulesConfigs = ALL_EXTRA_MODULES.filter((m) =>
-    appState.activeBottomModules.includes(m.id)
-  );
+  const activeBottomModulesConfigs = ALL_EXTRA_MODULES
+    .filter((module) => appState.activeBottomModules.includes(module.id))
+    .map((module) => getLocalizedModuleConfig(module, lang));
 
   const currentQuote = getRandomQuote(appState);
 
@@ -554,49 +314,11 @@ export default function App() {
     '--theme-glow3': `${themeC3}33`,
   } as React.CSSProperties;
 
-  // While auth status is initializing, show a loading screen to prevent screen flickering
-  if (isAuthInitializing) {
-    return (
-      <div className="min-h-screen w-full bg-slate-950 text-slate-100 flex flex-col items-center justify-center font-mono p-4">
-        <div className="relative flex flex-col items-center space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-cyan-950/80 border-2 border-cyan-500/50 flex items-center justify-center text-cyan-400 shadow-[0_0_30px_rgba(6,182,212,0.4)] animate-pulse">
-            <Shield className="w-8 h-8" />
-          </div>
-          <div className="flex items-center space-x-2 text-cyan-400 text-sm font-bold tracking-widest uppercase">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>AUTHENTICATING // SYSTEM INITIALIZATION</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <Register
-        lang={lang}
-        onSetLanguage={handleSetLanguage}
-        onRegisterSuccess={(accountData) => {
-          playSoundEffect('levelup');
-          setAppState((prev) => ({
-            ...prev,
-            profile: { ...prev.profile, name: accountData.username || prev.profile.name },
-            authAccount: {
-              email: accountData.email,
-              username: accountData.username,
-              token: `tok_${Date.now()}`,
-            },
-          }));
-        }}
-      />
-    );
-  }
-
   if (arcInitializationStatus === 'idle' || arcInitializationStatus === 'loading') {
     return (
       <div className="min-h-screen w-full bg-slate-950 text-cyan-400 flex items-center justify-center font-mono">
         <Loader2 className="w-6 h-6 animate-spin mr-3" />
-        <span>LOADING ARC PROGRESSION...</span>
+        <span>LOADING LOCAL ARC SAVE...</span>
       </div>
     );
   }
@@ -604,17 +326,18 @@ export default function App() {
   if (arcInitializationStatus === 'error') {
     return (
       <div className="min-h-screen w-full bg-slate-950 text-rose-300 flex items-center justify-center p-6 font-mono text-center">
-        ARC progression could not be loaded. Reload the application to retry.
+        ARC local data could not be loaded safely. Reload the application to retry recovery.
       </div>
     );
   }
 
-  // Missing authoritative progression always requires the complete three-step flow.
+  // A local save without initialized progression always requires the complete three-step flow.
   if (arcInitializationStatus === 'missing') {
     return (
       <CharacterCreation
         initialProfile={firstTimeProfileDraft ?? createFirstTimeProfileDraft(null)}
         initialStats={DEFAULT_STATS}
+        lang={lang}
         onComplete={handleCharacterCreationComplete}
       />
     );
@@ -622,7 +345,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-slate-950 font-sans transition-all duration-500"
+      className="arc-shell min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-slate-950 font-sans transition-all duration-500"
       style={dynamicThemeStyles}
     >
       {/* Top Interface Theme Accent Bar */}
@@ -639,16 +362,9 @@ export default function App() {
         activeAnimationId={appState.equippedAnimationId}
         customColors={appState.selectedDesignColors}
       />
-      {/* Dynamic Background Radial Glow according to active design colors */}
-      <div
-        className="fixed inset-0 pointer-events-none z-0 transition-all duration-700 opacity-60"
-        style={{
-          background: `radial-gradient(ellipse at top, ${themeC1}25 0%, ${themeC2}15 45%, ${themeC3}10 70%, #020617 100%)`,
-        }}
-      />
       <div className="fixed inset-0 bg-[linear-gradient(to_right,#00f0ff08_1px,transparent_1px),linear-gradient(to_bottom,#00f0ff08_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0" />
 
-      <div className="relative z-10 flex flex-col min-h-screen">
+      <div className="arc-app-frame relative z-10 flex flex-col" inert={introductionMode !== null}>
         {/* Cyber Header */}
         <CyberHeader
           dateStr={appState.lastActiveDate}
@@ -657,33 +373,39 @@ export default function App() {
           onSetLanguage={handleSetLanguage}
           onToggleSound={() => setSoundEnabled(!soundEnabled)}
           onOpenCharacterCreation={() => setIsConfirmNewCharOpen(true)}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          authAccount={appState.authAccount}
         />
 
+        <div className="arc-route-content">
         {/* Main Interface HUD Container */}
-        <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6 my-auto">
+        {activeDestination === 'home' && <main className="arc-main flex-1 max-w-5xl w-full mx-auto p-3 sm:p-6 space-y-4 sm:space-y-6 my-auto">
           {/* Top Profile Section */}
           <ProfileSection
             profile={appState.profile}
             stats={appState.stats}
             credits={appState.credits ?? 0}
             level={appState.level}
+            currentLevelXp={appState.currentLevelXp}
+            requiredLevelXp={appState.requiredLevelXp}
             lang={lang}
-            onOpenCommunity={() => {
+            equippedTitle={equippedAchievementTitle}
+            onOpenAppHub={() => {
               playSoundEffect('click');
-              setIsCommunityOpen(true);
+              setActiveDestination('appHub');
             }}
             onOpenShop={() => {
               playSoundEffect('click');
-              setIsShopOpen(true);
+              setActiveDestination('shop');
             }}
           />
 
-          {/* Middle Stat Action Icons Grid (Tagesaufgaben) */}
+          {/* Reference-order quote/date band between identity and daily action. */}
+          <DailyQuoteCard quote={currentQuote} lang={lang} isMinimized={!!appState.collapsedWindows?.motivation} onToggleMinimize={() => handleToggleWindowCollapse('motivation')} />
+
+          {/* Daily Protocols are daily assignments, not the separate Missions domain. */}
           <StatIconsGrid
             stats={appState.stats}
             completedTasksToday={appState.completedTasksToday}
+            dailyTaskTitles={Object.fromEntries((appState.arcAssignments || []).map((assignment) => [assignment.stat_id, mapLocalAssignmentToTaskItem(assignment, lang).title]))}
             lang={lang}
             isMinimized={!!appState.collapsedWindows?.dailyTasks}
             onToggleMinimize={() => handleToggleWindowCollapse('dailyTasks')}
@@ -693,80 +415,103 @@ export default function App() {
             }}
           />
 
-          {/* Daily Motivational Quote (Motivations Spruch / Impuls) */}
-          <DailyQuoteCard
-            quote={currentQuote}
-            lang={lang}
-            isMinimized={!!appState.collapsedWindows?.motivation}
-            onToggleMinimize={() => handleToggleWindowCollapse('motivation')}
-          />
-
-          {/* 7-Day Weekly Routine (Sieben Tage) - placed right above Calendar */}
-          <WeeklyRoutineWidget
+          <HomeProgressDeck
             appState={appState}
             lang={lang}
-            isMinimized={!!appState.collapsedWindows?.weeklyRoutine}
-            onToggleMinimize={() => handleToggleWindowCollapse('weeklyRoutine')}
-            onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
-            playSoundEffect={playSoundEffect}
+            modules={activeBottomModulesConfigs}
+            onOpenRoutine={() => setHomeDetailSurface('routine')}
+            onOpenCalendar={() => setHomeDetailSurface('calendar')}
+            onOpenStats={() => setIsGraphOpen(true)}
+            onOpenMissions={() => {
+              setObjectiveInitialView('missions');
+              setActiveDestination('missions');
+            }}
+            onOpenModule={setActiveExtraModule}
+            onCustomize={() => setIsSettingsOpen(true)}
           />
+        </main>}
 
-          {/* Calendar & Goal Countdown Widget (Kalender) */}
-          <CalendarWidget
-            appState={appState}
+        {activeDestination === 'missions' && (
+          <MissionsPage
+            key={objectiveInitialView}
             lang={lang}
-            isMinimized={!!appState.collapsedWindows?.calendar}
-            onToggleMinimize={() => handleToggleWindowCollapse('calendar')}
-            onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
-            playSoundEffect={playSoundEffect}
+            level={appState.level || 1}
+            currentXp={appState.currentLevelXp || 0}
+            requiredXp={appState.requiredLevelXp || 0}
+            initialView={objectiveInitialView}
+            onCreditBalanceChange={handleMissionCreditBalance}
           />
-        </main>
+        )}
+
+        {activeDestination === 'appHub' && (
+          <AppHubPage lang={lang} />
+        )}
+
+      {/* Shop is a first-class destination. Home is removed from the active canvas while this renders. */}
+      {activeDestination === 'shop' && (
+        <ShopModal
+          embedded
+          playerName={appState.profile.name}
+          playerAvatarUrl={appState.profile.avatarUrl}
+          playerLevel={appState.level || 1}
+          playerCurrentXp={appState.currentLevelXp || 0}
+          playerRequiredXp={appState.requiredLevelXp || 0}
+          lang={lang}
+          currentCredits={appState.credits ?? 0}
+          ownedSkinIds={appState.ownedSkinIds || []}
+          equippedSkinId={appState.equippedSkinId || ''}
+          lastWheelSpinDate={appState.lastWheelSpinDate || ''}
+          onBuySkin={async (skin) => {
+            const save = await localGameService.purchaseAndEquip(skin.id);
+            playSoundEffect('levelup');
+            setAppState((previous) => projectSaveToAppState(save, previous));
+            return true;
+          }}
+          onEquipSkin={async (skin) => {
+            if (!appState.ownedSkinIds?.includes(skin.id)) return;
+            const save = await localEconomyService.equipItem(skin.id);
+            playSoundEffect('click');
+            setAppState((previous) => projectSaveToAppState(save, previous));
+          }}
+          onClaimDailyWheel={async () => {
+            const today = getTodayDateString();
+            const claimed = await localGameService.claimWheel(today);
+            playSoundEffect('levelup');
+            setAppState((previous) => projectSaveToAppState(claimed.save, previous));
+            return { reward: claimed.result.reward, balance: claimed.result.balance };
+          }}
+          iapAvailable={localIapService.isAvailable()}
+          nativePlatform={nativeRuntimeService.platform()}
+          onLoadCreditProducts={loadIapProducts}
+          onPurchaseCredits={purchaseIapProduct}
+          onClose={() => setActiveDestination('home')}
+        />
+      )}
+
+        </div>
 
         {/* Bottom Navigation Bar */}
         <BottomBar
-          activeModules={activeBottomModulesConfigs}
           lang={lang}
+          onGoHome={() => { setActiveDestination('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onOpenMissions={() => { playSoundEffect('click'); setObjectiveInitialView('missions'); setActiveDestination('missions'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onOpenAppHub={() => { playSoundEffect('click'); setActiveDestination('appHub'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
           onOpenShop={() => {
             playSoundEffect('click');
-            setIsShopOpen(true);
+            setActiveDestination('shop');
           }}
-          onOpenSettings={() => {
-            playSoundEffect('click');
-            setIsSettingsOpen(true);
-          }}
-          onOpenGraph={() => {
-            playSoundEffect('click');
-            setIsGraphOpen(true);
-          }}
-          onToggleChat={() => {
-            playSoundEffect('click');
-            setIsChatOpen((prev) => !prev);
-          }}
-          isChatOpen={isChatOpen}
-          onOpenModuleContent={(mod) => {
-            playSoundEffect('click');
-            setActiveExtraModule(mod);
-          }}
+          onOpenMenu={() => setIsArcMenuOpen(true)}
+          activeDestination={activeDestination}
         />
       </div>
 
+      {introductionMode && <AppIntroduction lang={lang} onDismiss={finishIntroduction} />}
+
       {/* MODALS */}
 
-      {/* Chat Window Popover */}
-      {isChatOpen && (
-        <ChatWindow
-          appState={appState}
-          blockedUserIds={blockedUserIds}
-          onBlockedUserIdsChange={setBlockedUserIds}
-          lang={lang}
-          onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
-          onClose={() => setIsChatOpen(false)}
-          onOpenCommunity={() => {
-            setIsChatOpen(false);
-            setIsCommunityOpen(true);
-          }}
-        />
-      )}
+      {isArcMenuOpen && <ArcMenuModal lang={lang} onClose={() => setIsArcMenuOpen(false)} onOpenAchievements={() => { setIsArcMenuOpen(false); setObjectiveInitialView('achievements'); setActiveDestination('missions'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onOpenStats={() => { setIsArcMenuOpen(false); setIsGraphOpen(true); }} onOpenSettings={() => { setIsArcMenuOpen(false); setIsSettingsOpen(true); }} onOpenRoutine={() => { setIsArcMenuOpen(false); setHomeDetailSurface('routine'); }} onOpenCalendar={() => { setIsArcMenuOpen(false); setHomeDetailSurface('calendar'); }} onCreateCharacter={() => { setIsArcMenuOpen(false); setIsConfirmNewCharOpen(true); }} />}
+
+      {homeDetailSurface && <div className="arc-modal-overlay arc-detail-overlay fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6"><section className="arc-detail-surface"><button className="arc-detail-close" onClick={() => setHomeDetailSurface(null)}>×</button>{homeDetailSurface === 'routine' ? <WeeklyRoutineWidget appState={appState} lang={lang} onToggleMinimize={() => setHomeDetailSurface(null)} onUpdateAppState={(updated) => { setAppState((prev) => ({ ...prev, ...updated })); if (updated.weeklyRoutine) void localProfileService.updateWeeklyRoutine(updated.weeklyRoutine); }} playSoundEffect={playSoundEffect} /> : <CalendarWidget appState={appState} lang={lang} onToggleMinimize={() => setHomeDetailSurface(null)} onUpdateAppState={(updated) => { setAppState((prev) => ({ ...prev, ...updated })); if (updated.calendarState) void localProfileService.updateCalendar(updated.calendarState); }} playSoundEffect={playSoundEffect} />}</section></div>}
 
       {/* Daily Task Detail Modal */}
       {selectedStatForTask && (() => {
@@ -777,10 +522,10 @@ export default function App() {
         return (
         <TaskModal
           stat={selectedStatForTask}
-          task={mapArcAssignmentToTaskItem(selectedAssignment, lang)}
+          task={mapLocalAssignmentToTaskItem(selectedAssignment, lang)}
           isCompleted={selectedAssignment.completed_at !== null}
           assignmentKind={selectedAssignment.assignment_kind}
-          restdayOptions={getArcRestdayOptions(selectedAssignment)}
+          restdayOptions={getLocalRestdayOptions(selectedAssignment)}
           lang={lang}
           onClose={() => setSelectedStatForTask(null)}
           onMarkDone={handleMarkTaskDone}
@@ -791,51 +536,39 @@ export default function App() {
       {/* Settings Modal */}
       {isSettingsOpen && (
         <SettingsModal
+          onReplayIntroduction={() => { setIsSettingsOpen(false); setActiveDestination('home'); setIntroductionMode('replay'); }}
           appState={appState}
           lang={lang}
           onSetLanguage={handleSetLanguage}
           onSaveProfile={async (prof) => {
-            const confirmed = await updateMyProfile({
-              name: prof.name,
-              avatarUrl: prof.avatarUrl,
-              gender: prof.gender,
-            });
-            const confirmedProfile = {
-              name: confirmed.name,
-              avatarUrl: confirmed.avatar_url,
-              gender: confirmed.gender,
-            };
-            setAppState((prev) => ({
-              ...prev,
-              profile: { ...prof, ...confirmedProfile },
-            }));
-            useStore.getState().setProfile(confirmedProfile);
+            const save = await localGameService.updateProfile(prof);
+            setAppState((previous) => projectSaveToAppState(save, previous));
           }}
-          onSaveStats={(stats) => setAppState((prev) => ({ ...prev, stats }))}
-          onSaveQuoteSettings={(qs) => setAppState((prev) => ({ ...prev, quoteSettings: qs }))}
+          onSaveStats={async (stats) => {
+            const save = await localProgressionService.syncCustomAttributes(stats);
+            setAppState((previous) => projectSaveToAppState(save, previous));
+          }}
+          onSaveQuoteSettings={(qs) => {
+            setAppState((prev) => ({ ...prev, quoteSettings: qs }));
+            void localProfileService.updateSettings({ quotes: qs }).catch((error) => console.warn('ARC local quote-settings update failed:', error));
+          }}
           onSaveBottomModules={(mods) =>
-            setAppState((prev) => ({ ...prev, activeBottomModules: mods }))
+            {
+              setAppState((prev) => ({ ...prev, activeBottomModules: mods }));
+              void localProfileService.updateSettings({ activeBottomModules: mods }).catch((error) => console.warn('ARC local module-settings update failed:', error));
+            }
           }
-          onSaveDeletedTasks={(dts) => setAppState((prev) => ({ ...prev, deletedTasks: dts }))}
-          onOpenDeletedTasksModal={() => setIsDeletedTasksOpen(true)}
-          onToggleDesignColor={handleToggleDesignColor}
-          onEquipAnimation={handleEquipAnimation}
-          onOpenShopWithTab={(tab) => {
-            setIsSettingsOpen(false);
-            setShopInitialTab(tab);
-            setIsShopOpen(true);
-          }}
           onClose={() => setIsSettingsOpen(false)}
-        />
-      )}
-
-      {/* Deleted Tasks Modal */}
-      {isDeletedTasksOpen && (
-        <DeletedTasksModal
-          deletedTasks={appState.deletedTasks || []}
-          lang={lang}
-          onRestoreTask={handleRestoreTask}
-          onClose={() => setIsDeletedTasksOpen(false)}
+          onExportBackup={shareOrDownloadArcBackup}
+          onImportBackup={async (file) => {
+            const imported = await importLocalArcBackup(await file.text());
+            setLang(imported.settings.language);
+            setAppState((previous) => projectSaveToAppState(imported, previous));
+            const title = imported.titles.owned.find((item) => item.title_id === imported.titles.equippedTitleId);
+            setEquippedAchievementTitle(title ? getLocalizedTitleName(title.title_id, imported.settings.language, title) : null);
+            setArcInitializationStatus(imported.progression.initializedAt ? 'initialized' : 'missing');
+          }}
+          onRequestReset={() => { setIsSettingsOpen(false); setIsConfirmNewCharOpen(true); }}
         />
       )}
 
@@ -860,15 +593,9 @@ export default function App() {
           onPerformReload={async (moduleId, newSeenIds) => {
             playSoundEffect('click');
             try {
-              const newBalance = await spendCredits(1, 'module_reload', moduleId, { module_id: moduleId });
-              setAppState((prev) => ({
-                ...prev,
-                credits: newBalance,
-                seenModuleItemIds: {
-                  ...(prev.seenModuleItemIds || {}),
-                  [moduleId]: newSeenIds,
-                },
-              }));
+              const operationId = `${getTodayDateString()}:${moduleId}:${appState.moduleReloadsCountToday ?? 0}`;
+              const save = await localGameService.spendForModuleReload(moduleId, operationId, newSeenIds);
+              setAppState((previous) => projectSaveToAppState(save, previous));
               return true;
             } catch (error) {
               console.error('Module reload credit charge failed:', error);
@@ -877,124 +604,20 @@ export default function App() {
           }}
           onOpenShop={() => {
             setActiveExtraModule(null);
-            setIsShopOpen(true);
+            setActiveDestination('shop');
           }}
           onClose={() => setActiveExtraModule(null)}
         />
       )}
 
-      {/* Community Modal */}
-      {isCommunityOpen && (
-        <CommunityModal
-          appState={appState}
-          blockedUserIds={blockedUserIds}
-          onBlockedUserIdsChange={setBlockedUserIds}
-          lang={lang}
-          onUpdateAppState={(updated) => setAppState((prev) => ({ ...prev, ...updated }))}
-          onClose={() => setIsCommunityOpen(false)}
-        />
-      )}
-
-      {/* Shop Modal */}
-      {isShopOpen && (
-        <ShopModal
-          lang={lang}
-          currentCredits={appState.credits ?? 0}
-          ownedSkinIds={appState.ownedSkinIds || []}
-          equippedSkinId={appState.equippedSkinId || ''}
-          lastWheelSpinDate={appState.lastWheelSpinDate || ''}
-          hasUnlockedDesignCustomizer={appState.hasUnlockedDesignCustomizer || false}
-          unlockedDesignColors={appState.unlockedDesignColors || ['#f59e0b']}
-          selectedDesignColors={appState.selectedDesignColors || []}
-          purchasedAnimationIds={appState.purchasedAnimationIds || []}
-          equippedAnimationId={appState.equippedAnimationId || ''}
-          initialTab={shopInitialTab}
-          onAddCredits={async (amount) => {
-            playSoundEffect('click');
-            await startCreditCheckout(amount);
-          }}
-          onBuySkin={async (skin) => {
-            try {
-              const newBalance = await purchaseStoreItem(skin.id);
-              playSoundEffect('levelup');
-              setAppState((prev) => {
-                const updatedProfile = { ...prev.profile };
-                if (skin.avatarUrl) updatedProfile.avatarUrl = skin.avatarUrl;
-                if (skin.titleName) updatedProfile.title = skin.titleName;
-                return {
-                  ...prev,
-                  credits: newBalance,
-                  ownedSkinIds: [...new Set([...(prev.ownedSkinIds || []), skin.id])],
-                  equippedSkinId: skin.id,
-                  profile: updatedProfile,
-                };
-              });
-              return true;
-            } catch (error) {
-              console.error('Skin purchase failed:', error);
-              return false;
-            }
-          }}
-          onEquipSkin={(skin) => {
-            playSoundEffect('click');
-            setAppState((prev) => {
-              const updatedProfile = { ...prev.profile };
-              if (skin.avatarUrl) {
-                updatedProfile.avatarUrl = skin.avatarUrl;
-              }
-              if (skin.titleName) {
-                updatedProfile.title = skin.titleName;
-              }
-              return {
-                ...prev,
-                equippedSkinId: skin.id,
-                profile: updatedProfile,
-              };
-            });
-          }}
-          onUnlockDesignCustomizer={handleUnlockDesignCustomizer}
-          onBuyColor={handleBuyColor}
-          onToggleDesignColor={handleToggleDesignColor}
-          onBuyAnimation={handleBuyAnimation}
-          onEquipAnimation={handleEquipAnimation}
-          onClaimDailyWheel={async () => {
-            const today = getTodayDateString();
-            const result = await claimDailyWheel();
-            playSoundEffect('levelup');
-            setAppState((prev) => ({ ...prev, credits: result.balance, lastWheelSpinDate: today }));
-            return result;
-          }}
-          onClose={() => setIsShopOpen(false)}
-        />
-      )}
-
-      {/* Auth Modal */}
-      {isAuthOpen && (
-        <AuthModal
-          currentAuth={appState.authAccount || null}
-          onLoginSuccess={(account) => {
-            playSoundEffect('levelup');
-            setAppState((prev) => ({
-              ...prev,
-              authAccount: account,
-            }));
-          }}
-          onLogout={() => {
-            playSoundEffect('click');
-            setAppState((prev) => ({
-              ...prev,
-              authAccount: null,
-            }));
-          }}
-          onClose={() => setIsAuthOpen(false)}
-        />
-      )}
-
       {/* Confirmation Modal for Creating New Character */}
       {isConfirmNewCharOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md font-mono animate-fadeIn">
+        <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md font-mono animate-fadeIn">
           <div
-            className="relative w-full max-w-md bg-slate-900 border rounded-xl p-5 sm:p-6 shadow-2xl space-y-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="arc-reset-title"
+            className="arc-modal relative w-full max-w-md bg-slate-900 border rounded-xl p-5 sm:p-6 shadow-2xl space-y-4"
             style={{
               borderColor: 'var(--theme-c1)',
               boxShadow: '0 0 30px var(--theme-glow1)',
@@ -1004,7 +627,7 @@ export default function App() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <UserCheck className="w-5 h-5 shrink-0" style={{ color: 'var(--theme-c1)' }} />
-                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wide">
+                <h3 id="arc-reset-title" className="text-sm font-bold text-slate-100 uppercase tracking-wide">
                   {lang === 'en' ? 'Create new character?' : 'Neuen Charakter erstellen?'}
                 </h3>
               </div>
@@ -1013,6 +636,7 @@ export default function App() {
                   if (!isResettingCharacter) setIsConfirmNewCharOpen(false);
                 }}
                 disabled={isResettingCharacter}
+                aria-label={lang === 'en' ? 'Close reset confirmation' : 'Zurücksetzen-Dialog schließen'}
                 className="text-slate-400 hover:text-slate-200 p-1 rounded transition-all"
               >
                 <X className="w-4 h-4" />
@@ -1023,8 +647,11 @@ export default function App() {
             <div className="space-y-3">
               <p className="text-sm text-slate-200 leading-relaxed font-sans font-medium">
                 {lang === 'en'
-                  ? 'Your current character, progression, tasks, friends, clan and other character data will be permanently deleted.'
-                  : 'Dein aktueller Charakter, Fortschritt, Aufgaben, Freunde, Clan und weitere Charakterdaten werden dauerhaft gelöscht.'}
+                  ? 'Your current character, progression, tasks, missions and achievements will be permanently deleted.'
+                  : 'Dein aktueller Charakter, Fortschritt, Aufgaben, Missionen und Erfolge werden dauerhaft gelöscht.'}
+              </p>
+              <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                {lang === 'en' ? 'Progress is stored only on this device. Export a backup before resetting if you may need it later.' : 'Fortschritt wird nur auf diesem Gerät gespeichert. Exportiere vor dem Zurücksetzen ein Backup, falls du ihn später noch benötigst.'}
               </p>
 
               <div
@@ -1036,7 +663,7 @@ export default function App() {
               >
                 <div className="font-bold flex items-center space-x-2" style={{ color: 'var(--theme-c1)' }}>
                   <Shield className="w-4 h-4 shrink-0" />
-                  <span>{lang === 'en' ? 'Account Property Preserved' : 'Account-Eigentum bleibt erhalten'}</span>
+                  <span>{lang === 'en' ? 'Local Collection Preserved' : 'Lokale Sammlung bleibt erhalten'}</span>
                 </div>
                 <p className="text-slate-300 text-[11px] leading-relaxed font-sans">
                   {lang === 'en'

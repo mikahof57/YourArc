@@ -3,6 +3,7 @@ import { DayHistoryRecord, StatAttribute } from '../../types';
 import { X, TrendingUp, Calendar } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { Language, translateStatName } from '../../utils/i18n';
+import { useModalAccessibility } from '../../hooks/useModalAccessibility';
 
 interface StatsGraphModalProps {
   history: DayHistoryRecord[];
@@ -15,6 +16,7 @@ const COLOR_PALETTE = ['#00f0ff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#
 
 export const StatsGraphModal: React.FC<StatsGraphModalProps> = ({ history, stats, lang = 'en', onClose }) => {
   const [timeframe, setTimeframe] = useState<'7' | '30' | '90' | 'all'>('30');
+  const dialogRef = useModalAccessibility<HTMLDivElement>(onClose);
 
   // Filter history based on timeframe
   const getFilteredHistory = () => {
@@ -28,17 +30,17 @@ export const StatsGraphModal: React.FC<StatsGraphModalProps> = ({ history, stats
 
   const chartData = getFilteredHistory().map((item) => {
     const formattedDate = item.date.slice(5); // MM-DD
-    const entry: Record<string, any> = { date: formattedDate };
+    const entry: Record<string, string | number> = { date: formattedDate };
     stats.forEach((st) => {
-      const translatedName = translateStatName(st.name, lang);
-      entry[translatedName] = item.stats[st.id] ?? 1;
+      const value = item.stats[st.id];
+      if (value !== undefined) entry[st.id] = value;
     });
     return entry;
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-cyan-500/40 rounded-xl p-5 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto max-h-[90vh] flex flex-col">
+    <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="arc-stats-title" className="arc-modal relative w-full max-w-4xl bg-slate-900 border border-cyan-500/40 rounded-xl p-5 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto max-h-[90vh] flex flex-col">
         {/* Corner Accents */}
         <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl" />
         <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
@@ -48,6 +50,7 @@ export const StatsGraphModal: React.FC<StatsGraphModalProps> = ({ history, stats
         {/* Close button */}
         <button
           onClick={onClose}
+          aria-label={lang === 'en' ? 'Close statistics' : 'Statistik schließen'}
           className="absolute top-4 right-4 p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
         >
           <X className="w-5 h-5" />
@@ -60,7 +63,7 @@ export const StatsGraphModal: React.FC<StatsGraphModalProps> = ({ history, stats
               <TrendingUp className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-100 uppercase tracking-wide flex items-center space-x-2">
+              <h2 id="arc-stats-title" className="text-lg font-bold text-slate-100 uppercase tracking-wide flex items-center space-x-2">
                 <span>{lang === 'en' ? 'ATTRIBUTE PROGRESSION' : 'STATUS ENTWICKLUNG'}</span>
                 <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/30">
                   {lang === 'en' ? 'ANALYSIS' : 'ANALYSIS'}
@@ -124,7 +127,9 @@ export const StatsGraphModal: React.FC<StatsGraphModalProps> = ({ history, stats
                     <Line
                       key={st.id}
                       type="monotone"
-                      dataKey={name}
+                      dataKey={st.id}
+                      name={name}
+                      connectNulls={false}
                       stroke={COLOR_PALETTE[idx % COLOR_PALETTE.length]}
                       strokeWidth={2}
                       dot={{ r: 3, fill: COLOR_PALETTE[idx % COLOR_PALETTE.length] }}

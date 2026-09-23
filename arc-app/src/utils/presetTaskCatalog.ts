@@ -119,6 +119,9 @@ export function validateCanonicalPresetTaskCatalog(
     }
 
     const task = candidate as Partial<CanonicalPresetTask>;
+    if (task.catalogVersion !== ARC_PRESET_TASK_CATALOG_VERSION) {
+      issues.push({ code: 'catalog_version_invalid', path: `${path}.catalogVersion`, message: `Expected ${ARC_PRESET_TASK_CATALOG_VERSION}.` });
+    }
     if (typeof task.taskKey !== 'string' || task.taskKey.length === 0) {
       issues.push({ code: 'task_key_missing', path: `${path}.taskKey`, message: 'Task key must be a non-empty string.' });
     } else if (taskKeys.has(task.taskKey)) {

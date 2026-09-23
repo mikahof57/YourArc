@@ -1,7 +1,7 @@
 import { AppState, Quote, WeeklyRoutineState } from '../types';
 import { DEFAULT_STATS } from '../data/defaultStats';
 import { QUOTES_DATABASE } from '../data/quotes';
-import { generateCharacterCode } from '../data/communityData';
+import { generateCharacterCode } from './characterCode';
 
 const STORAGE_KEY = 'arc_app_system_state_v1';
 
@@ -29,7 +29,7 @@ export function getInitialState(): AppState {
     profile: {
       name: '',
       gender: 'm',
-      avatarUrl: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=500&auto=format&fit=crop&q=80',
+      avatarUrl: '/assets/skins/Data Scholar.png',
       avatarCategory: 'anime',
       isCreated: false,
       createdAt: today,
@@ -50,10 +50,9 @@ export function getInitialState(): AppState {
     ],
     moduleReloadsCountToday: 0,
     seenModuleItemIds: {},
-    credits: 0, // Temporary local cache until the server balance is hydrated
+    credits: 0,
     consecutiveLoginDays: 1,
     lastDailyBonusDate: today,
-    authAccount: null,
     ownedSkinIds: [],
     equippedSkinId: '',
     lastWheelSpinDate: '',
@@ -101,7 +100,6 @@ export function loadAppState(): AppState {
       } else {
         parsed.profile.characterCode = generateCharacterCode();
       }
-      saveAppState(parsed);
     }
 
     // Missing legacy local balances must not create synthetic credits.
@@ -178,28 +176,18 @@ export function loadAppState(): AppState {
       parsed.collapsedWindows = {};
     }
 
-    // localStorage is only a cache. Server hydration owns ARC progression/day state.
+    // This legacy payload is an import/cache format; ArcSaveRepository owns progression.
     const today = getTodayDateString();
     if (parsed.lastActiveDate !== today) {
       // Use the date only to prevent repeated UI-cache resets before server hydration.
       parsed.lastActiveDate = today;
       parsed.moduleReloadsCountToday = 0;
-
-      saveAppState(parsed);
     }
 
     return parsed;
   } catch (err) {
     console.error('Failed to load AppState from localStorage:', err);
     return getInitialState();
-  }
-}
-
-export function saveAppState(state: AppState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (err) {
-    console.error('Failed to save AppState:', err);
   }
 }
 

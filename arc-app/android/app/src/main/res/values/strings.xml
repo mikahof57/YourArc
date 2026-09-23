@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MY ARC</string>
+    <string name="title_activity_main">MY ARC</string>
+    <string name="package_name">com.yourarc.arc</string>
+    <string name="custom_url_scheme">com.yourarc.arc</string>
+</resources>

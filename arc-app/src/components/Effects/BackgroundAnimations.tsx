@@ -8,32 +8,8 @@ interface BackgroundAnimationsProps {
 
 export const BackgroundAnimations: React.FC<BackgroundAnimationsProps> = ({
   activeAnimationId,
-  customColors = [],
 }) => {
   if (!activeAnimationId) {
-    // If no active animation, check if custom design colors are active to apply background glow
-    if (customColors.length > 0) {
-      return (
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          <div
-            className="absolute -top-32 -left-32 w-96 h-96 rounded-full blur-3xl opacity-25 animate-pulse"
-            style={{ backgroundColor: customColors[0] || '#f59e0b' }}
-          />
-          {customColors[1] && (
-            <div
-              className="absolute top-1/2 -right-32 w-96 h-96 rounded-full blur-3xl opacity-20 animate-pulse"
-              style={{ backgroundColor: customColors[1], animationDelay: '1s' }}
-            />
-          )}
-          {customColors[2] && (
-            <div
-              className="absolute -bottom-32 left-1/3 w-96 h-96 rounded-full blur-3xl opacity-20 animate-pulse"
-              style={{ backgroundColor: customColors[2], animationDelay: '2s' }}
-            />
-          )}
-        </div>
-      );
-    }
     return null;
   }
 

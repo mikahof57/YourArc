@@ -1,26 +1,19 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ARC
 
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/64f2f452-552c-485b-82a0-7df447e3b0f1
+ARC is a local-first, offline single-player progression app built with React, Vite and Capacitor.
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisite:** Node.js
 
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
 
-## ARC Community + Payments Backend
+Create a production web bundle with `npm run build`; synchronize it into the native projects with `npx cap sync`.
 
-The project now contains the code-side implementation for the ARC Community, realtime chat, clans, secure credit economy and Stripe Checkout architecture.
+ARC stores gameplay in its versioned IndexedDB savegame. Native credit purchases use StoreKit/Google Play Billing through environment-configured product identifiers; store prices always come from the native store response.
 
-See `SUPABASE_STRIPE_SETUP.md` for the remaining platform-side setup. The application intentionally keeps private Supabase/Stripe credentials out of the frontend.
+See [the architecture index](docs/architecture-index.md) for the current system boundaries.

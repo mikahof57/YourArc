@@ -40,8 +40,8 @@ export const DeletedTasksModal: React.FC<DeletedTasksModalProps> = ({
   ).map((s: string) => JSON.parse(s));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn font-mono">
-      <div className="relative w-full max-w-xl bg-slate-900 border-2 border-rose-500/50 rounded-2xl p-5 sm:p-6 shadow-[0_0_50px_rgba(244,63,94,0.25)] flex flex-col max-h-[85vh]">
+    <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn font-mono">
+      <div className="arc-modal relative w-full max-w-xl bg-slate-900 border-2 border-rose-500/50 rounded-2xl p-5 sm:p-6 shadow-[0_0_50px_rgba(244,63,94,0.25)] flex flex-col max-h-[85vh]">
         {/* Futuristic Corner accents */}
         <div className="absolute top-0 left-0 w-3.5 h-3.5 border-t-2 border-l-2 border-rose-400 rounded-tl-2xl" />
         <div className="absolute top-0 right-0 w-3.5 h-3.5 border-t-2 border-r-2 border-rose-400 rounded-tr-2xl" />
@@ -80,11 +80,11 @@ export const DeletedTasksModal: React.FC<DeletedTasksModalProps> = ({
         <p className="text-xs text-slate-400 my-3 leading-relaxed">
           {lang === 'en' ? (
             <>
-              Click <strong className="text-cyan-400">Restore</strong> on a task to add it back to your active daily tasks.
+              Click <strong className="text-cyan-400">Restore</strong> to return a task to your local task library. Today&apos;s server assignment is unchanged.
             </>
           ) : (
             <>
-              Klicke auf <strong className="text-cyan-400">Wiederherstellen</strong> bei einer Aufgabe, um sie wieder zu den aktiven Tagesaufgaben deines Statuswerts hinzuzufügen.
+              Mit <strong className="text-cyan-400">Wiederherstellen</strong> kehrt eine Aufgabe in deine lokale Aufgabenbibliothek zurück. Die heutige Server-Zuweisung bleibt unverändert.
             </>
           )}
         </p>
@@ -149,8 +149,8 @@ export const DeletedTasksModal: React.FC<DeletedTasksModalProps> = ({
               </span>
               <p className="text-xs text-slate-500 max-w-xs mt-1">
                 {lang === 'en'
-                  ? 'All preset and custom tasks are active in your daily task list.'
-                  : 'Alle vorgespeicherten und eigenen Aufgaben sind aktiv in deinen Tagesaufgaben enthalten.'}
+                  ? 'No tasks are currently archived in this local compatibility library.'
+                  : 'In dieser lokalen Kompatibilitätsbibliothek sind aktuell keine Aufgaben archiviert.'}
               </p>
             </div>
           ) : filtered.length === 0 ? (

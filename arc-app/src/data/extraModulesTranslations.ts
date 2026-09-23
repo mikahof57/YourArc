@@ -1,4 +1,33 @@
+import { BottomBarModuleConfig } from '../types';
 import { ModuleContentItem } from './extraModules';
+
+const EXTRA_MODULE_LABELS: Record<string, { en: { title: string; description: string }; de: { title: string; description: string } }> = {
+  motivation: {
+    en: { title: 'Motivational Quotes', description: 'Daily dose of unwavering discipline & mindset protocols.' },
+    de: { title: 'Motivationssprüche', description: 'Tägliche Dosis unerschütterliche Disziplin & Mindset-Protokolle.' },
+  },
+  business_ideas: {
+    en: { title: 'Business Ideas', description: 'Scalable business models, SaaS concepts & high-income skills.' },
+    de: { title: 'Business-Ideen', description: 'Skalierbare Geschäftsmodelle, SaaS-Konzepte & High-Income-Skills.' },
+  },
+  books: {
+    en: { title: 'Book Recommendations', description: 'The 150 most important works for entrepreneurship, mindset, finance & strength.' },
+    de: { title: 'Bücher Empfehlungen', description: 'Die 150 wichtigsten Werke für Unternehmertum, Mindset, Finanzen & Stärke.' },
+  },
+  biohacking: {
+    en: { title: 'Biohacking Protocols', description: 'Sleep optimization, light exposure, dopamine fasting & recovery.' },
+    de: { title: 'Biohacking Protocols', description: 'Schlafoptimierung, Lichtexposition, Dopamin-Fasten & Erholung.' },
+  },
+  stoic_rules: {
+    en: { title: 'Stoic Rules', description: 'Iron maxims for emotional control & resilience.' },
+    de: { title: 'Stoische Regeln', description: 'Eiserne Maximen zur emotionalen Kontrolle & Resilienz.' },
+  },
+};
+
+export function getLocalizedModuleConfig(module: BottomBarModuleConfig, lang: string): BottomBarModuleConfig {
+  const localized = EXTRA_MODULE_LABELS[module.id]?.[lang === 'en' ? 'en' : 'de'];
+  return localized ? { ...module, ...localized } : module;
+}
 
 export const EXTRA_MODULES_EN_TRANSLATIONS: Record<string, Partial<ModuleContentItem>> = {
   // ==========================================

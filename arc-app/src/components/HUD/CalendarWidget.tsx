@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { getTodayDateString } from '../../utils/storage';
 import { Language } from '../../utils/i18n';
+import { DEFAULT_AVATAR_URL } from '../../data/avatars';
 import {
   translateEventTitle,
   translateEventDesc,
@@ -44,6 +45,10 @@ interface CalendarWidgetProps {
   playSoundEffect: (type: 'complete' | 'click' | 'levelup') => void;
 }
 
+// Legacy group-calendar records remain in ArcSaveGame for import compatibility,
+// but the accountless v1 product exposes only the private local calendar.
+export const ARC_GROUP_CALENDARS_ACTIVE = false as const;
+
 export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   appState,
   lang = 'en',
@@ -52,8 +57,9 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   onUpdateAppState,
   playSoundEffect,
 }) => {
-  const todayStr = getTodayDateString();
-  const [currentViewDate, setCurrentViewDate] = useState<Date>(new Date());
+  const todayStr = appState.arcDay || getTodayDateString();
+  const arcToday = new Date(`${todayStr}T00:00:00`);
+  const [currentViewDate, setCurrentViewDate] = useState<Date>(arcToday);
   const [selectedDateStr, setSelectedDateStr] = useState<string>(todayStr);
 
   // Modals & Forms State
@@ -87,18 +93,18 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     activeCalendarId: 'private',
   };
 
-  const activeCalendarId = calendarState.activeCalendarId || 'private';
+  const activeCalendarId = 'private';
   const groupCalendars = calendarState.groupCalendars || [];
   const privateEvents = calendarState.privateEvents || [];
 
-  const activeGroupCalendar = groupCalendars.find((g) => g.id === activeCalendarId);
+  const activeGroupCalendar = ARC_GROUP_CALENDARS_ACTIVE
+    ? groupCalendars.find((g) => g.id === activeCalendarId)
+    : undefined;
 
   // Events for current calendar
-  const currentEvents: CalendarEvent[] = activeGroupCalendar
-    ? activeGroupCalendar.events || []
-    : privateEvents;
+  const currentEvents: CalendarEvent[] = privateEvents;
 
-  // Monetization must remain disabled until group calendars are server-persisted.
+  // Monetization remains disabled while group calendars are outside the local V1 product.
   const existingGroupsCount = groupCalendars.length;
   const nextGroupCost = 0;
   const canCreateMoreGroups = existingGroupsCount < 3;
@@ -132,7 +138,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
   const handleJumpToToday = () => {
     playSoundEffect('click');
-    setCurrentViewDate(new Date());
+    setCurrentViewDate(arcToday);
     setSelectedDateStr(todayStr);
   };
 
@@ -202,7 +208,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     // Try finding in friends
     const friend = (appState.friends || []).find((f) => f.characterCode?.toUpperCase() === code);
     const memberName = friend ? friend.name : `${lang === 'en' ? 'Player' : 'Spieler'} ${code.slice(-4)}`;
-    const avatarUrl = friend?.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=150';
+    const avatarUrl = friend?.avatarUrl || DEFAULT_AVATAR_URL;
 
     setAddedMembersList((prev) => [
       ...prev,
@@ -287,7 +293,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
     const friend = (appState.friends || []).find((f) => f.characterCode?.toUpperCase() === code);
     const memberName = friend ? friend.name : `${lang === 'en' ? 'Player' : 'Spieler'} ${code.slice(-4)}`;
-    const avatarUrl = friend?.avatarUrl || 'https://images.unsplash.com/photo-1563089145-599997674d42?w=150';
+    const avatarUrl = friend?.avatarUrl || DEFAULT_AVATAR_URL;
 
     const updatedMembers = [
       ...activeGroupCalendar.members,
@@ -452,7 +458,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
   if (isMinimized) {
     return (
       <div
-        className="w-full bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 backdrop-blur-md transition-all duration-300 flex items-center justify-between"
+        className="arc-panel w-full bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 backdrop-blur-md transition-all duration-300 flex items-center justify-between"
         style={{
           borderColor: 'var(--theme-c1)',
           boxShadow: '0 0 10px var(--theme-glow1)',
@@ -480,7 +486,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
   return (
     <div
-      className="w-full bg-slate-900/90 border rounded-xl p-4 sm:p-5 backdrop-blur-md font-mono relative overflow-hidden transition-all duration-500 space-y-4"
+      className="arc-panel arc-calendar-system w-full bg-slate-900/90 border rounded-xl p-4 sm:p-5 backdrop-blur-md font-mono relative overflow-hidden transition-all duration-500 space-y-4"
       style={{
         borderColor: 'var(--theme-c1)',
         boxShadow: '0 0 25px var(--theme-glow1)',
@@ -505,17 +511,11 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
               <h2 className="text-sm font-bold text-slate-100 uppercase tracking-wider">
                 {lang === 'en' ? 'CALENDAR & GOALS' : 'KALENDER & ZIELE'}
               </h2>
-              {activeGroupCalendar && (
-                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold flex items-center space-x-1">
-                  <Users className="w-3 h-3" />
-                  <span>{lang === 'en' ? 'Group' : 'Gruppe'} ({activeGroupCalendar.members.length})</span>
-                </span>
-              )}
             </div>
             <p className="text-[11px] text-slate-400 font-sans">
               {lang === 'en'
-                ? 'Track events & set target count-down goals for personal or group achievements.'
-                : 'Termine eintragen & Tage-Countdowns für persönliche oder Gruppen-Ziele verwalten.'}
+                ? 'Track private events and set personal target count-down goals.'
+                : 'Verwalte private Termine und Countdowns für persönliche Ziele.'}
             </p>
           </div>
         </div>
@@ -532,29 +532,8 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
               }}
             >
               <option value="private">🔒 {lang === 'en' ? 'Private Calendar' : 'Privater Kalender'}</option>
-              {groupCalendars.map((g) => (
-                <option key={g.id} value={g.id}>
-                  👥 {g.name} ({g.members.length} {lang === 'en' ? 'mem.' : 'Mitg.'})
-                </option>
-              ))}
-              <option value="CREATE_NEW">
-                + {lang === 'en' ? 'Create Group Calendar' : 'Gruppenkalender erstellen'} ({existingGroupsCount}/3)
-              </option>
             </select>
           </div>
-
-          {activeGroupCalendar && (
-            <button
-              onClick={() => {
-                playSoundEffect('click');
-                setIsManageGroupOpen(true);
-              }}
-              title={lang === 'en' ? 'Manage Group' : 'Gruppe & Mitglieder verwalten'}
-              className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 text-xs flex items-center space-x-1 transition-all"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
-            </button>
-          )}
 
           {onToggleMinimize && (
             <button
@@ -896,7 +875,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
       {isAddEventOpen &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn"
+            className="arc-modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn"
             onClick={() => setIsAddEventOpen(false)}
           >
             <div
@@ -1062,7 +1041,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
         )}
 
       {/* MODAL 2: CREATE GROUP CALENDAR MODAL */}
-      {isCreateGroupOpen &&
+      {ARC_GROUP_CALENDARS_ACTIVE && isCreateGroupOpen &&
         createPortal(
           <div
             className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn"
@@ -1309,7 +1288,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
         )}
 
       {/* MODAL 3: MANAGE GROUP CALENDAR & MEMBERS */}
-      {isManageGroupOpen && activeGroupCalendar &&
+      {ARC_GROUP_CALENDARS_ACTIVE && isManageGroupOpen && activeGroupCalendar &&
         createPortal(
           <div
             className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn"

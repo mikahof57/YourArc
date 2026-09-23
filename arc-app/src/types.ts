@@ -160,6 +160,14 @@ export interface ArcDailyPayload {
   stats: ArcDailyStat[];
   assignments: ArcDailyAssignment[];
   recent_server_history: ArcServerHistoryPoint[];
+  custom_tasks?: Array<{
+    task_id: string;
+    stat_id: string;
+    title: string;
+    description: string;
+    tier: number | null;
+    sort_order: number;
+  }>;
 }
 
 export interface ArcCompletionResult {
@@ -195,128 +203,6 @@ export interface ArcCustomAssignmentSwapResult {
   completed: boolean;
 }
 
-export interface FriendUser {
-  id: string;
-  name: string;
-  characterCode: string;
-  avatarUrl: string;
-  level: number;
-  isOnline: boolean;
-  lastTaskCompletedText: string;
-  statStreaks: Record<string, number>; // statId -> streak days
-  totalPoints: number;
-}
-
-export interface ClanMember {
-  id: string;
-  name: string;
-  characterCode: string;
-  avatarUrl: string;
-  role: 'leader' | 'officer' | 'member';
-  isOnline: boolean;
-  level: number;
-  joinedAt: string;
-}
-
-export interface ClanBadgeConfig {
-  shapeId: number; // 1 to 10 shield shapes
-  colors: string[]; // 1 to 3 colors (e.g., ['#00f0ff', '#a855f7', '#ec4899'])
-  emoji: string; // iOS emoji
-}
-
-export interface ClanJoinRequest {
-  id: string;
-  clanId: string;
-  userId: string;
-  userName: string;
-  userCode: string;
-  userAvatar: string;
-  userLevel: number;
-  userPoints: number;
-  sentAt: string;
-}
-
-export interface ClanInvitation {
-  id: string;
-  clanId: string;
-  clanName: string;
-  clanTag: string;
-  clanBadgeEmoji: string;
-  clanBadgeConfig?: ClanBadgeConfig;
-  fromUserName: string;
-  sentAt: string;
-}
-
-export interface ClanData {
-  id: string;
-  name: string;
-  tag: string;
-  leaderCode: string;
-  description: string;
-  members: ClanMember[];
-  clanPoints: number;
-  badgeEmoji: string;
-  badgeConfig?: ClanBadgeConfig;
-  joinRequests?: ClanJoinRequest[];
-}
-
-export interface LeaderboardUser {
-  id: string;
-  name: string;
-  characterCode: string;
-  avatarUrl: string;
-  level: number;
-  standardPoints: number;
-  rank: number;
-  isCurrentUser?: boolean;
-}
-
-export interface FriendRequest {
-  id: string;
-  fromUserId: string;
-  fromUserName: string;
-  fromUserCode: string;
-  fromUserAvatar: string;
-  fromUserLevel: number;
-  fromUserPoints: number;
-  sentAt: string;
-  viaCode?: boolean;
-}
-
-export interface ChatMessage {
-  id: string;
-  conversationId?: string;
-  senderId: string;
-  senderName: string;
-  senderAvatar: string;
-  text: string;
-  timestamp: string;
-  isUser?: boolean;
-}
-
-export interface ChatChannel {
-  id: string;
-  name: string;
-  isGroup: boolean;
-  avatarUrl?: string;
-  memberIds: string[]; // Friend IDs or character codes
-  lastMessage?: string;
-  lastMessageTime?: string;
-  unreadCount?: number;
-  messages: ChatMessage[];
-}
-
-export interface ChatState {
-  channels: ChatChannel[];
-  clanMessages: ChatMessage[];
-}
-
-export interface UserAuthAccount {
-  email: string;
-  isVerified: boolean;
-  createdAt: string;
-}
-
 export interface WeeklyDayTask {
   id: string;
   text: string;
@@ -343,21 +229,11 @@ export interface AppState {
   history: DayHistoryRecord[];
   moduleReloadsCountToday?: number; // 0 to 3 reloads per day
   seenModuleItemIds?: Record<string, string[]>; // moduleId -> list of seen item IDs
-  friends?: FriendUser[];
-  incomingFriendRequests?: FriendRequest[];
-  sentFriendRequestIds?: string[]; // IDs of players user sent request to
-  declinedRequestsInfo?: Record<string, number>; // playerId -> timestamp when declined
-  userClan?: ClanData | null;
-  clans?: ClanData[];
-  clanInvitations?: ClanInvitation[];
-  sentClanJoinRequestIds?: string[]; // IDs of clans user requested to join
   statStreaks?: Record<string, number>; // statId -> streak in days for user
-  chatState?: ChatState;
   deletedTasks?: DeletedTaskItem[];
   credits?: number; // Server-authoritative user credit balance cached locally
   consecutiveLoginDays?: number; // Daily consecutive login streak count
   lastDailyBonusDate?: string; // YYYY-MM-DD when last daily bonus was granted
-  authAccount?: UserAuthAccount | null; // Logged in user account details
   ownedSkinIds?: string[]; // IDs of skins owned by user
   equippedSkinId?: string; // Currently equipped skin ID
   lastWheelSpinDate?: string; // YYYY-MM-DD when last daily wheel spin occurred

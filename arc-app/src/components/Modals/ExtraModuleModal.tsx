@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BottomBarModuleConfig } from '../../types';
 import {
   EXTRA_MODULES_CONTENT,
   ModuleContentItem,
   getFreshModuleItems,
 } from '../../data/extraModules';
-import { getLocalizedModuleItem } from '../../data/extraModulesTranslations';
+import { getLocalizedModuleConfig, getLocalizedModuleItem } from '../../data/extraModulesTranslations';
 import { X, RefreshCw, Sparkles, CheckCircle2, Coins, AlertCircle } from 'lucide-react';
+import { useModalAccessibility } from '../../hooks/useModalAccessibility';
 
 interface ExtraModuleModalProps {
   moduleConfig: BottomBarModuleConfig;
@@ -36,51 +37,32 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
   const [isReloading, setIsReloading] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [creditError, setCreditError] = useState<string | null>(null);
+  const reloadPendingRef = useRef(false);
+  const dialogRef = useModalAccessibility<HTMLDivElement>(onClose);
 
-  // Localized Module Title & Description
-  const moduleTitleMap: Record<string, { en: string; de: string }> = {
-    motivation: { en: 'Motivational Quotes', de: 'Motivationssprüche' },
-    business_ideas: { en: 'Business Ideas', de: 'Business-Ideen' },
-    books: { en: 'Book Recommendations', de: 'Bücher Empfehlungen' },
-    biohacking: { en: 'Biohacking Protocols', de: 'Biohacking Protocols' },
-    stoic_rules: { en: 'Stoic Rules', de: 'Stoische Regeln' },
-  };
-
-  const moduleDescMap: Record<string, { en: string; de: string }> = {
-    motivation: {
-      en: 'Daily dose of unwavering discipline & mindset protocols.',
-      de: 'Tägliche Dosis unerschütterliche Disziplin & Mindset-Protokolle.',
-    },
-    business_ideas: {
-      en: 'Scalable business models, SaaS concepts & high-income skills.',
-      de: 'Skalierbare Geschäftsmodelle, SaaS-Konzepte & High-Income-Skills.',
-    },
-    books: {
-      en: 'The 150 most important works for entrepreneurship, mindset, finance & strength.',
-      de: 'Die 150 wichtigsten Werke für Unternehmertum, Mindset, Finanzen & Stärke.',
-    },
-    biohacking: {
-      en: 'Sleep optimization, light exposure, dopamine fasting & recovery.',
-      de: 'Schlafoptimierung, Lichtexposition, Dopamin-Fasten & Erholung.',
-    },
-    stoic_rules: {
-      en: 'Iron maxims for emotional control & resilience.',
-      de: 'Eiserne Maximen zur emotionalen Kontrolle & Resilienz.',
-    },
-  };
-
-  const displayTitle = moduleTitleMap[moduleConfig.id]?.[lang === 'en' ? 'en' : 'de'] || moduleConfig.title;
-  const displayDesc = moduleDescMap[moduleConfig.id]?.[lang === 'en' ? 'en' : 'de'] || moduleConfig.description;
+  const localizedModule = getLocalizedModuleConfig(moduleConfig, lang);
+  const displayTitle = localizedModule.title;
+  const displayDesc = localizedModule.description;
 
   // Initialize fresh items on mount if empty or load existing
   useEffect(() => {
     const existingSeen = seenModuleItemIds[moduleConfig.id] || [];
+    const catalog = EXTRA_MODULES_CONTENT[moduleConfig.id] || [];
+    const persistedItems = existingSeen
+      .slice(-3)
+      .map((itemId) => catalog.find((item) => item.id === itemId))
+      .filter((item): item is ModuleContentItem => item !== undefined);
+    if (persistedItems.length === Math.min(3, catalog.length)) {
+      setCurrentItems(persistedItems);
+      setCurrentSeenIds(existingSeen);
+      return;
+    }
     const { items, updatedSeenIds } = getFreshModuleItems(moduleConfig.id, existingSeen, 3);
     setCurrentItems(items);
     setCurrentSeenIds(updatedSeenIds);
   }, [moduleConfig.id]);
 
-  const handleReload = () => {
+  const handleReload = async () => {
     setCreditError(null);
 
     if (currentCredits < 1) {
@@ -92,15 +74,17 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
       return;
     }
 
-    if (isReloading) return;
+    if (reloadPendingRef.current) return;
 
+    reloadPendingRef.current = true;
     setIsReloading(true);
 
     // Pick 3 new non-duplicate items
     const { items, updatedSeenIds } = getFreshModuleItems(moduleConfig.id, currentSeenIds, 3);
 
-    setTimeout(async () => {
-      // Execute reload (deducts 1 credit and updates seen IDs)
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      // Execute reload (deducts 1 credit and updates seen IDs).
       const success = await onPerformReload(moduleConfig.id, updatedSeenIds);
 
       if (success) {
@@ -115,68 +99,51 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
             : 'Konnte Neuladung nicht durchführen. Bitte überprüfe deine Credits.'
         );
       }
-
+    } catch {
+      setCreditError(
+        lang === 'en'
+          ? 'Could not perform reload. Please check your credits.'
+          : 'Konnte Neuladung nicht durchführen. Bitte überprüfe deine Credits.'
+      );
+    } finally {
+      reloadPendingRef.current = false;
       setIsReloading(false);
-    }, 350);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-cyan-500/40 rounded-xl p-5 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto max-h-[85vh] flex flex-col">
+    <div className="arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-xl animate-fadeIn font-mono">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={displayTitle} className="arc-modal arc-extra-module relative w-full max-w-2xl bg-slate-900 border border-cyan-500/40 rounded-xl p-5 sm:p-7 shadow-[0_0_50px_rgba(0,240,255,0.2)] my-auto">
         {/* Corner Accents */}
         <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl" />
         <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
         <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-cyan-400 rounded-bl-xl" />
         <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-cyan-400 rounded-br-xl" />
 
-        {/* Top Right Action Controls: Reload & Close */}
-        <div className="absolute top-4 right-4 flex items-center space-x-2">
-          <button
-            onClick={handleReload}
-            disabled={isReloading}
-            title={lang === 'en' ? 'Load new suggestions (Costs 1 Credit)' : 'Neue Vorschläge laden (Kostet 1 Credit)'}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all shadow-sm active:scale-95 border-amber-500/60 bg-amber-950/80 text-amber-300 hover:bg-amber-900 hover:border-amber-400 hover:shadow-[0_0_12px_rgba(245,158,11,0.3)]"
-          >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${
-                isReloading ? 'animate-spin text-amber-400' : 'text-amber-400'
-              }`}
-            />
-            <span>{lang === 'en' ? 'Reload (1 Cr)' : 'Neu laden (1 Cr)'}</span>
-          </button>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-all"
-            title={lang === 'en' ? 'Close' : 'Schließen'}
-          >
+        <header className="arc-module-header">
+          <div className="arc-module-identity">
+            <div className="arc-module-icon" aria-hidden="true">{moduleConfig.icon}</div>
+            <span className="arc-module-eyebrow">{lang === 'en' ? 'SYSTEM MODULE // CONTENT CATALOG' : 'SYSTEMMODUL // INHALTSKATALOG'}</span>
+          </div>
+          <button onClick={onClose} className="arc-module-close"
+            aria-label={lang === 'en' ? 'Close extra module' : 'Zusatzmodul schließen'}>
             <X className="w-5 h-5" />
           </button>
-        </div>
-
-        {/* Header */}
-        <div className="flex items-center space-x-3 border-b border-slate-800 pb-4 mb-4 pr-52">
-          <div className="w-10 h-10 rounded-lg bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-xl shrink-0 shadow-[0_0_10px_rgba(0,240,255,0.2)]">
-            {moduleConfig.icon}
+          <h2 className="arc-module-title">{displayTitle}</h2>
+          <div className="arc-module-actions">
+            <button type="button" onClick={onOpenShop} disabled={!onOpenShop} className="arc-module-credits"
+              title={lang === 'en' ? 'View balance / Open shop' : 'Guthaben anzeigen / Shop öffnen'}>
+              <Coins className="w-4 h-4 shrink-0" /><span>{currentCredits} Credits</span>
+            </button>
+            <button type="button" onClick={handleReload} disabled={isReloading} className="arc-module-reload"
+              title={lang === 'en' ? 'Load new suggestions (Costs 1 Credit)' : 'Neue Vorschläge laden (Kostet 1 Credit)'}>
+              <RefreshCw className={`w-4 h-4 shrink-0 ${isReloading ? 'animate-spin' : ''}`} />
+              <span>{lang === 'en' ? 'Reload (1 Cr)' : 'Neu laden (1 Cr)'}</span>
+            </button>
           </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px] text-cyan-400 uppercase tracking-widest block">
-                SYSTEM MODULE // CONTENT CATALOG
-              </span>
-              <span
-                onClick={onOpenShop}
-                className="text-[9px] bg-amber-950 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded cursor-pointer hover:border-amber-400 flex items-center space-x-1 font-bold"
-                title={lang === 'en' ? 'View balance / Open shop' : 'Guthaben anzeigen / Shop öffnen'}
-              >
-                <Coins className="w-3 h-3 text-amber-400" />
-                <span>{currentCredits} Credits</span>
-              </span>
-            </div>
-            <h2 className="text-lg font-bold text-slate-100 uppercase">{displayTitle}</h2>
-          </div>
-        </div>
+        </header>
 
+        <div className="arc-module-body">
         <p className="text-xs text-slate-400 mb-3">{displayDesc}</p>
 
         {/* Credit Error Toast */}
@@ -189,7 +156,7 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
             {onOpenShop && (
               <button
                 onClick={onOpenShop}
-                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] uppercase ml-2"
+                className="px-2 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] uppercase ml-2"
               >
                 {lang === 'en' ? 'To Shop' : 'Zum Shop'}
               </button>
@@ -207,7 +174,7 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
 
         {/* Content Items List */}
         <div
-          className={`space-y-3 overflow-y-auto pr-1 flex-1 transition-opacity duration-300 ${
+          className={`space-y-3 min-w-0 transition-opacity duration-300 ${
             isReloading ? 'opacity-30' : 'opacity-100'
           }`}
         >
@@ -242,6 +209,7 @@ export const ExtraModuleModal: React.FC<ExtraModuleModalProps> = ({
               </div>
             );
           })}
+        </div>
         </div>
       </div>
     </div>

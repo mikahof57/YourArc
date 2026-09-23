@@ -1,36 +1,58 @@
 import React, { useState } from 'react';
-import { UserProfile, StatAttribute, Gender } from '../../types';
-import { AVATAR_PRESETS } from '../../data/avatars';
+import { UserProfile, StatAttribute } from '../../types';
+import { ONBOARDING_CHARACTERS, type OnboardingGender } from '../../data/onboardingCharacters';
 import { DEFAULT_STATS } from '../../data/defaultStats';
-import { getTierIndex, getTierInfo } from '../../data/taskDatabase';
-import { Shield, ChevronRight, Check, User, Sparkles, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { getTierIndex, getTierInfo, get365PresetTasksForStat } from '../../data/taskDatabase';
+import { Shield, ChevronRight, Check, Sparkles, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { Language, translateStatName } from '../../utils/i18n';
 
 interface CharacterCreationProps {
   initialProfile: UserProfile;
   initialStats: StatAttribute[];
   onComplete: (profile: UserProfile, selectedStats: StatAttribute[]) => Promise<void> | void;
+  lang: Language;
 }
+
+const COPY = {
+  de: {
+    steps: ['01 CHARAKTER', '02 IDENTITÄT', '03 ATTRIBUTE'], heading: 'Charakter-Erstellung', sections: ['Charakter', 'Basis-Daten', 'Statuswerte'],
+    identityTitle: '2. Identität & Physis', identityHelp: 'Gib deine physischen Parameter an (optional – kann übersprungen werden).',
+    name: 'Codename / Name', namePlaceholder: 'z. B. Alex / Monarch', gender: 'Geschlecht',
+    age: 'Alter (Jahre)', agePlaceholder: 'z. B. 25', weight: 'Gewicht (kg)', weightPlaceholder: 'z. B. 80', height: 'Größe (cm)', heightPlaceholder: 'z. B. 182',
+    skip: 'Überspringen & weiter →', nextIdentity: 'Weiter zur Identität', avatarTitle: '1. Charakter wählen', avatarHelp: 'Wähle deinen ARC-Charakter.',
+    back: '← Zurück', nextStats: 'Weiter zu den Statuswerten', statsTitle: '3. Statuswerte wählen', statsHelp: 'Wähle die Statuswerte, die du täglich auf 100 % steigern möchtest.',
+    dailyTask: 'Tägliche Aufgabe', start: 'Start-Prozentwert:', until: 'bis', progressionHelp: 'Jeder Wert startet mit deinen gewählten Start-Prozentpunkten. Deine täglichen Aufgaben steigern diese Werte lokal auf diesem Gerät.',
+    initializing: 'INITIALISIERUNG…', finish: 'SYSTEM INITIALISIEREN', error: 'Die Charakter-Initialisierung ist fehlgeschlagen.', statToggle: 'Statuswert auswählen',
+  },
+  en: {
+    steps: ['01 CHARACTER', '02 IDENTITY', '03 ATTRIBUTES'], heading: 'Character Creation', sections: ['Character', 'Basic Data', 'Attributes'],
+    identityTitle: '2. Identity & Physique', identityHelp: 'Enter your physical parameters (optional – you can skip this step).',
+    name: 'Codename / Name', namePlaceholder: 'e.g. Alex / Monarch', gender: 'Gender',
+    age: 'Age (years)', agePlaceholder: 'e.g. 25', weight: 'Weight (kg)', weightPlaceholder: 'e.g. 80', height: 'Height (cm)', heightPlaceholder: 'e.g. 182',
+    skip: 'Skip & continue →', nextIdentity: 'Continue to identity', avatarTitle: '1. Choose Character', avatarHelp: 'Choose your ARC character.',
+    back: '← Back', nextStats: 'Continue to attributes', statsTitle: '3. Choose Attributes', statsHelp: 'Choose the attributes you want to increase toward 100% through daily tasks.',
+    dailyTask: 'Daily task', start: 'Starting percentage:', until: 'up to', progressionHelp: 'Each attribute starts at your selected percentage. Your daily tasks increase these values locally on this device.',
+    initializing: 'INITIALIZING…', finish: 'INITIALIZE SYSTEM', error: 'Character initialization failed.', statToggle: 'Select attribute',
+  },
+} as const;
 
 export const CharacterCreation: React.FC<CharacterCreationProps> = ({
   initialProfile,
   initialStats,
   onComplete,
+  lang,
 }) => {
+  const copy = COPY[lang];
   const [step, setStep] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Step 1 State - Personal Info
+  // One gender selection drives the onboarding portrait and saved identity.
   const [name, setName] = useState<string>(initialProfile.name || '');
-  const [gender, setGender] = useState<Gender>(initialProfile.gender || 'm');
+  const [gender, setGender] = useState<OnboardingGender>(initialProfile.gender === 'f' ? 'f' : 'm');
   const [age, setAge] = useState<string>(initialProfile.age ? String(initialProfile.age) : '');
   const [weight, setWeight] = useState<string>(initialProfile.weight ? String(initialProfile.weight) : '');
   const [height, setHeight] = useState<string>(initialProfile.height ? String(initialProfile.height) : '');
-
-  // Step 2 State - Avatar Selection
-  const [selectedGenderFilter, setSelectedGenderFilter] = useState<'m' | 'f'>(initialProfile.gender === 'f' ? 'f' : 'm');
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<'all' | 'anime' | 'superheroes' | 'comic'>('all');
-  const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string>(initialProfile.avatarUrl || AVATAR_PRESETS[0].url);
 
   // Step 3 State - Stats selection
   const [selectedStatIds, setSelectedStatIds] = useState<string[]>(
@@ -43,12 +65,6 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       initMap[s.id] = existing?.startValue ?? existing?.value ?? 0;
     });
     return initMap;
-  });
-
-  const filteredAvatars = AVATAR_PRESETS.filter((a) => {
-    const matchesGender = a.gender === selectedGenderFilter;
-    const matchesCategory = selectedCategoryFilter === 'all' || a.category === selectedCategoryFilter;
-    return matchesGender && matchesCategory;
   });
 
   const handleToggleStat = (id: string) => {
@@ -67,7 +83,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       age: age ? parseInt(age, 10) : undefined,
       weight: weight ? parseFloat(weight) : undefined,
       height: height ? parseFloat(height) : undefined,
-      avatarUrl: selectedAvatarUrl,
+      avatarUrl: ONBOARDING_CHARACTERS.find((character) => character.gender === gender)!.url,
       isCreated: true,
       createdAt: initialProfile.createdAt || new Date().toISOString().split('T')[0],
       characterCode: initialProfile.characterCode,
@@ -88,17 +104,15 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
       await onComplete(finalProfile, finalStats);
     } catch (error) {
       console.error('ARC character initialization failed:', error);
-      setSubmitError(
-        error instanceof Error ? error.message : 'Die Charakter-Initialisierung ist fehlgeschlagen.',
-      );
+      setSubmitError(copy.error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 backdrop-blur-xl overflow-y-auto font-mono text-slate-200">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-cyan-500/30 rounded-xl p-5 sm:p-8 shadow-[0_0_50px_rgba(0,240,255,0.15)] my-auto">
+    <div className="arc-onboarding arc-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 backdrop-blur-xl overflow-y-auto font-mono text-slate-200">
+      <div className="arc-modal relative w-full max-w-2xl bg-slate-900 border border-cyan-500/30 rounded-xl p-5 sm:p-8 shadow-[0_0_50px_rgba(0,240,255,0.15)] my-auto" role="dialog" aria-modal="true" aria-labelledby="arc-character-creation-title">
         {/* Futuristic Corner Accents */}
         <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-cyan-400 rounded-tl-xl" />
         <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-cyan-400 rounded-tr-xl" />
@@ -107,12 +121,15 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
 
         {/* Progress Header */}
         <div className="mb-6">
-          <div className="flex items-center justify-between text-xs text-cyan-400 uppercase tracking-widest mb-2">
+          <div className="arc-activation-steps" aria-hidden="true">
+            {copy.steps.map((label, index) => <span key={label} className={step === index + 1 ? 'is-active' : step > index + 1 ? 'is-complete' : ''}>{label}</span>)}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center justify-between text-xs text-cyan-400 uppercase tracking-widest mb-2">
             <span className="flex items-center space-x-2">
               <Shield className="w-4 h-4 text-cyan-400 animate-pulse" />
-              <span>Charakter-Erstellung // Schritt {step} von 3</span>
+              <span id="arc-character-creation-title">{copy.heading} // {lang === 'en' ? 'Step' : 'Schritt'} {step} {lang === 'en' ? 'of' : 'von'} 3</span>
             </span>
-            <span>{step === 1 ? 'Basis-Daten' : step === 2 ? 'Profilbild' : 'Statuswerte'}</span>
+            <span>{copy.sections[step - 1]}</span>
           </div>
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
@@ -129,236 +146,117 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
           </div>
         )}
 
-        {/* STEP 1: Personal Data */}
-        {step === 1 && (
+        {/* STEP 2: Personal Data */}
+        {step === 2 && (
           <div className="space-y-5 animate-fadeIn">
             <div className="text-center sm:text-left border-b border-slate-800 pb-3">
-              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">1. Identität & Physis</h2>
+              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">{copy.identityTitle}</h2>
               <p className="text-xs text-slate-400 mt-1">
-                Gib deine physischen Parameter an (Optional – kann auch übersprungen werden).
+                {copy.identityHelp}
               </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Codename / Name</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{copy.name}</label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="z.B. Alex / Monarch"
+                  placeholder={copy.namePlaceholder}
                   className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-sm text-cyan-200 outline-none transition-all placeholder:text-slate-600"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Geschlecht</label>
-                <div className="flex space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGender('m');
-                      setSelectedGenderFilter('m');
-                    }}
-                    className={`flex-1 py-2 px-3 rounded text-xs font-medium border transition-all ${
-                      gender === 'm'
-                        ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.2)]'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    ♂ Männlich
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGender('f');
-                      setSelectedGenderFilter('f');
-                    }}
-                    className={`flex-1 py-2 px-3 rounded text-xs font-medium border transition-all ${
-                      gender === 'f'
-                        ? 'bg-pink-950/80 border-pink-400 text-pink-300 shadow-[0_0_10px_rgba(236,72,153,0.2)]'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    ♀ Weiblich
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGender('d')}
-                    className={`py-2 px-3 rounded text-xs font-medium border transition-all ${
-                      gender === 'd'
-                        ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    ⚥ Divers
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Alter (Jahre)</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{copy.age}</label>
                 <input
                   type="number"
                   value={age}
                   onChange={(e) => setAge(e.target.value)}
-                  placeholder="z.B. 25"
+                  placeholder={copy.agePlaceholder}
                   className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-sm text-cyan-200 outline-none transition-all placeholder:text-slate-600"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Gewicht (kg)</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{copy.weight}</label>
                 <input
                   type="number"
                   value={weight}
                   onChange={(e) => setWeight(e.target.value)}
-                  placeholder="z.B. 80"
+                  placeholder={copy.weightPlaceholder}
                   className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-sm text-cyan-200 outline-none transition-all placeholder:text-slate-600"
                 />
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-slate-300 mb-1">Größe (cm)</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{copy.height}</label>
                 <input
                   type="number"
                   value={height}
                   onChange={(e) => setHeight(e.target.value)}
-                  placeholder="z.B. 182"
+                  placeholder={copy.heightPlaceholder}
                   className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-sm text-cyan-200 outline-none transition-all placeholder:text-slate-600"
                 />
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-800">
+              <button type="button" onClick={() => setStep(1)} className="text-xs text-slate-400 hover:text-slate-200">{copy.back}</button>
               <button
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 className="text-xs text-slate-400 hover:text-slate-200 underline"
               >
-                Überspringen & Weiter →
+                {copy.skip}
               </button>
               <button
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,240,255,0.4)]"
               >
-                <span>Weiter zum Profilbild</span>
+                <span>{copy.nextStats}</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 2: Avatar Selection */}
-        {step === 2 && (
+        {/* STEP 1: Onboarding identity; deliberately separate from Shop cosmetics. */}
+        {step === 1 && (
           <div className="space-y-5 animate-fadeIn">
             <div className="border-b border-slate-800 pb-3">
-              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">2. Profilbild Wählen</h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Wähle einen Badass-Avatar aus verschiedenen Kategorien.
-              </p>
+              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">{copy.avatarTitle}</h2>
+              <p className="text-xs text-slate-400 mt-1">{copy.avatarHelp}</p>
             </div>
-
-            {/* Filter controls */}
-            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 p-2.5 rounded border border-slate-800">
-              {/* Gender filter */}
-              <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setSelectedGenderFilter('m')}
-                  className={`px-3 py-1 rounded text-xs transition-all ${
-                    selectedGenderFilter === 'm'
-                      ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  ♂ Männlich
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedGenderFilter('f')}
-                  className={`px-3 py-1 rounded text-xs transition-all ${
-                    selectedGenderFilter === 'f'
-                      ? 'bg-pink-950 text-pink-300 border border-pink-500/40'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  ♀ Weiblich
-                </button>
+            <fieldset className="min-w-0">
+              <legend className="sr-only">{copy.gender}</legend>
+              <div className="grid grid-cols-2 gap-3">
+                {ONBOARDING_CHARACTERS.map((character) => {
+                  const isSelected = gender === character.gender;
+                  const label = character.labels[lang];
+                  return (
+                    <label key={character.gender} className="relative min-w-0 cursor-pointer">
+                      <input type="radio" name="onboarding-gender" value={character.gender}
+                        checked={isSelected} onChange={() => setGender(character.gender)}
+                        className="peer sr-only" />
+                      <span className={`block overflow-hidden rounded-lg border transition-all peer-focus-visible:outline-2 peer-focus-visible:outline-offset-4 peer-focus-visible:outline-cyan-300 ${isSelected
+                        ? 'border-cyan-400 ring-2 ring-cyan-400/50 bg-cyan-950/40 shadow-[0_0_15px_rgba(0,240,255,0.3)]'
+                        : 'border-slate-700 bg-slate-950 hover:border-slate-500'}`}>
+                        <img src={character.url} alt="" width="240" height="280" className="w-full aspect-[6/7] object-contain" />
+                        <span className="block p-3 text-center text-sm font-bold text-slate-100">{label}</span>
+                        {isSelected && <span aria-hidden="true" className="absolute top-2 right-2 rounded-full bg-cyan-400 p-1 text-slate-950"><Check className="h-4 w-4" /></span>}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
-
-              {/* Category filter */}
-              <div className="flex items-center space-x-1">
-                {(['all', 'anime', 'superheroes', 'comic'] as const).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategoryFilter(cat)}
-                    className={`px-2.5 py-1 rounded text-[11px] capitalize transition-all ${
-                      selectedCategoryFilter === cat
-                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {cat === 'all' ? 'Alle' : cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Avatars Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-64 overflow-y-auto pr-1">
-              {filteredAvatars.map((av) => {
-                const isSelected = selectedAvatarUrl === av.url;
-                return (
-                  <div
-                    key={av.id}
-                    onClick={() => {
-                      setSelectedAvatarUrl(av.url);
-                    }}
-                    className={`group relative cursor-pointer rounded-lg overflow-hidden border transition-all ${
-                      isSelected
-                        ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_15px_rgba(0,240,255,0.4)]'
-                        : 'border-slate-800 hover:border-slate-600 opacity-80 hover:opacity-100'
-                    }`}
-                  >
-                    <img
-                      src={av.url}
-                      alt={av.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-24 object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 bg-slate-950/80 p-1 text-[10px] text-center text-slate-300 truncate">
-                      {av.name}
-                    </div>
-                    {isSelected && (
-                      <div className="absolute top-1.5 right-1.5 bg-cyan-500 text-slate-950 p-0.5 rounded-full">
-                        <Check className="w-3.5 h-3.5" />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="text-xs text-slate-400 hover:text-slate-200"
-              >
-                ← Zurück
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep(3)}
-                className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,240,255,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span>Weiter zu den Statuswerten</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            </fieldset>
+            <button type="button" onClick={() => setStep(2)}
+              className="flex w-full items-center justify-center gap-2 rounded bg-cyan-500 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-950 hover:bg-cyan-400">
+              {copy.nextIdentity}<ChevronRight className="h-4 w-4 shrink-0" />
+            </button>
           </div>
         )}
 
@@ -366,9 +264,9 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
         {step === 3 && (
           <div className="space-y-5 animate-fadeIn">
             <div className="border-b border-slate-800 pb-3">
-              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">3. Statuswerte Wählen</h2>
+              <h2 className="text-xl font-bold text-slate-100 uppercase tracking-wide">{copy.statsTitle}</h2>
               <p className="text-xs text-slate-400 mt-1">
-                Wähle die Status-Attribute, die du täglich auf 100% steigern möchtest.
+                {copy.statsHelp}
               </p>
             </div>
 
@@ -385,16 +283,19 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
                         : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'
                     }`}
                   >
-                    <div
+                    <button
+                      type="button"
                       onClick={() => handleToggleStat(st.id)}
-                      className="cursor-pointer flex items-center justify-between"
+                      className="cursor-pointer flex items-center justify-between w-full text-left"
+                      aria-label={`${copy.statToggle}: ${translateStatName(st.name, lang)}`}
+                      aria-pressed={isSelected}
                     >
                       <div className="flex items-center space-x-3">
                         <span className="text-2xl">{st.emoji}</span>
                         <div>
-                          <div className="text-sm font-bold text-slate-100">{st.name}</div>
+                          <div className="text-sm font-bold text-slate-100">{translateStatName(st.name, lang)}</div>
                           <div className="text-[11px] text-slate-400">
-                            {st.tasks[0]?.title || 'Tägliche Aufgabe'}
+                            {get365PresetTasksForStat(st.id, st.name, lang)[0]?.title || copy.dailyTask}
                           </div>
                         </div>
                       </div>
@@ -405,12 +306,12 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
                       >
                         {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                       </div>
-                    </div>
+                    </button>
 
                     {/* Starting Percentage Setting */}
                     {isSelected && (() => {
                       const tierIdx = getTierIndex(startVal);
-                      const tierInfo = getTierInfo(tierIdx, 'de');
+                      const tierInfo = getTierInfo(tierIdx, lang);
                       return (
                         <div
                           onClick={(e) => e.stopPropagation()}
@@ -418,10 +319,10 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
                         >
                           <div className="flex items-center space-x-2">
                             <span className="text-slate-400 text-[11px]">
-                              Start-Prozentwert bei Beginn:
+                              {copy.start}
                             </span>
                             <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-bold">
-                              {tierInfo.label} (bis {tierInfo.maxPercent}%)
+                              {tierInfo.label} ({copy.until} {tierInfo.maxPercent}%)
                             </span>
                           </div>
                           <div className="flex items-center space-x-2">
@@ -465,18 +366,17 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
             <div className="bg-slate-950/80 p-3 rounded border border-cyan-500/20 text-xs text-slate-300 flex items-start space-x-2">
               <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
               <span>
-                Jeder Wert startet mit deinen gewählten <strong className="text-cyan-300">Start-Prozentpunkten</strong>.
-                Im Community-Bereich werden nur deine <strong className="text-emerald-400">erarbeiteten Zusatz-Prozentpunkte</strong> verglichen!
+                {copy.progressionHelp}
               </span>
             </div>
 
-            <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+            <div className="flex flex-wrap gap-3 items-center justify-between pt-4 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setStep(2)}
                 className="text-xs text-slate-400 hover:text-slate-200"
               >
-                ← Zurück
+                {copy.back}
               </button>
               <button
                 type="button"
@@ -484,7 +384,7 @@ export const CharacterCreation: React.FC<CharacterCreationProps> = ({
                 disabled={isSubmitting}
                 className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-slate-950 font-bold px-6 py-3 rounded text-xs uppercase tracking-widest transition-all shadow-[0_0_25px_rgba(0,240,255,0.5)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span>{isSubmitting ? 'INITIALISIERUNG...' : 'SYSTEM INITIALISIEREN'}</span>
+                <span>{isSubmitting ? copy.initializing : copy.finish}</span>
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
               </button>
             </div>

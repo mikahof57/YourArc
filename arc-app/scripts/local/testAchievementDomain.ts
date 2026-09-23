@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { ACHIEVEMENT_CATALOG, ARC_TITLE_CATALOG, INACTIVE_LEGACY_ACHIEVEMENT_IDS, isActiveAchievement, serializeAchievementCatalog, validateAchievementCatalog } from '../../src/features/achievements/achievementCatalog';
+import { calculateAchievementProgress, emptyAchievementSnapshot, getUnlockedAchievements } from '../../src/features/achievements/achievementEngine';
+import { sha256Hex } from '../../src/features/content/contentHash';
+import { ACHIEVEMENT_CATALOG_HASH } from '../../src/features/content/contentManifest';
+validateAchievementCatalog();assert.equal(ACHIEVEMENT_CATALOG.length,78);assert.equal(ARC_TITLE_CATALOG.length,13);assert.equal(new Set(ACHIEVEMENT_CATALOG.map(x=>x.achievement_id)).size,78);
+assert.equal(await sha256Hex(serializeAchievementCatalog()),ACHIEVEMENT_CATALOG_HASH);
+const future={...ACHIEVEMENT_CATALOG[0],achievement_id:79,sort_order:79};assert.doesNotThrow(()=>validateAchievementCatalog([...ACHIEVEMENT_CATALOG,future].slice(1)));
+const s=emptyAchievementSnapshot();assert.equal(getUnlockedAchievements(ACHIEVEMENT_CATALOG,s).length,0);
+s.dailyTotal=500;assert.equal(calculateAchievementProgress(ACHIEVEMENT_CATALOG[2],s).completed,true);
+s.categoryCounts={wissen:100,muskeln:50,beweglichkeit:50,geist:100,business:100,geld:100};assert.equal(calculateAchievementProgress(ACHIEVEMENT_CATALOG[10],s).current,100);assert.equal(calculateAchievementProgress(ACHIEVEMENT_CATALOG[28],s).completed,true);
+s.maxStreak=365;assert.equal(calculateAchievementProgress(ACHIEVEMENT_CATALOG[42],s).completed,true);
+s.uniqueSkinIds=['fortune-sovereign-1','fortune-sovereign-2'];s.skinTiers={'fortune-sovereign-1':'extreme_epic','fortune-sovereign-2':'extreme_epic'};assert.equal(calculateAchievementProgress(ACHIEVEMENT_CATALOG[55],s).current,2);
+s.globalRankMilestones=[{rank:1,population:100}];s.clanRankMilestones=[{rank:1,population:100}];
+assert.deepEqual(ACHIEVEMENT_CATALOG.filter(item=>!isActiveAchievement(item)).map(item=>item.achievement_id),[...INACTIVE_LEGACY_ACHIEVEMENT_IDS]);
+assert.equal(ACHIEVEMENT_CATALOG.filter(isActiveAchievement).length,69);
+console.log('ARC Achievement tests passed: achievements=78, titles=13, hash, history, body, diversity, streak, skins and dormant ranking rules');
