@@ -38,11 +38,9 @@ assert.equal(AVAILABLE_SKINS.filter((skin) => skin.collection === 'entry' && ski
 
 assert.doesNotMatch(app, /startCreditCheckout|onAddCredits=/);
 assert.doesNotMatch(shop, /Jetzt Kostenpflichtig Kaufen|onAddCredits|grantedCredits/);
-assert.match(shop, /Credit purchases require the native mobile app/);
-assert.match(shop, /onPurchaseCredits\(productId\)/);
-assert.match(shop, /displayPrice \?\? '—'/);
+assert.doesNotMatch(shop, /onPurchaseCredits|displayPrice|Credit packages|Credit-Pakete|setActiveTab\('exchange'\)/);
 assert.match(app, /await localGameService\.purchaseAndEquip\(skin\.id\)/);
-assert.match(app, /await localGameService\.claimWheel\(today\)/);
+assert.doesNotMatch(app, /claimWheel|onClaimDailyWheel|lastWheelSpinDate/);
 assert.doesNotMatch(app, /purchaseStoreItem|claimDailyWheel|startCreditCheckout/);
 assert.match(app, /if \(!appState\.ownedSkinIds\?\.includes\(skin\.id\)\) return/);
 

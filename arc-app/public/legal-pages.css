@@ -1,0 +1,35 @@
+:root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e2e8f0; background: #060912; line-height: 1.7; }
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(ellipse at top left, #102234 0, transparent 38rem), #060912; }
+.shell { width: min(100%, 54rem); margin: auto; padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(1.25rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
+header, footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+header { border-bottom: 1px solid #324155; padding-bottom: 1rem; }
+.brand { font-weight: 800; letter-spacing: .12em; font-size: 1.25rem; margin: 0; }
+.brand span, a { color: #80e7f5; }
+nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+nav a { display: inline-flex; align-items: center; min-height: 44px; }
+a { text-underline-offset: .22em; overflow-wrap: anywhere; }
+a:hover { color: #e4c7ff; }
+a[aria-current=page] { color: #e4c7ff; text-decoration-thickness: 2px; }
+a:focus-visible { outline: 2px solid #80e7f5; outline-offset: 4px; border-radius: 2px; }
+main { padding: 2rem 0; min-width: 0; }
+h1 { font-size: clamp(1.8rem, 6vw, 2.6rem); line-height: 1.2; letter-spacing: -.025em; overflow-wrap: anywhere; }
+h2 { font-size: 1.2rem; line-height: 1.4; color: #ecf4ff; }
+p, li, address { overflow-wrap: anywhere; }
+p { margin: .75rem 0; }
+li + li { margin-top: .6rem; }
+ul { padding-left: 1.4rem; }
+.eyebrow { color: #80e7f5; text-transform: uppercase; letter-spacing: .1em; font-size: .75rem; }
+.intro, .date, footer { color: #b1bfd1; }
+.date { font-size: .875rem; }
+section { padding: 1.25rem 0; border-bottom: 1px solid #273448; }
+address { font-style: normal; }
+.draft { border: 1px solid #9d7741; background: #241c13; border-radius: .6rem; padding: 1rem; color: #ffdda4; }
+.placeholder { color: #ffdda4; background: #241c13; border-radius: .25rem; padding: .1rem .25rem; overflow-wrap: anywhere; }
+p.placeholder { padding: .75rem; }
+.contact { padding: 1rem; border: 1px solid #466178; border-radius: .6rem; }
+.skip { position: absolute; left: 1rem; top: -6rem; padding: .75rem; background: #060912; z-index: 1; }
+.skip:focus { top: 1rem; }
+footer { padding: 1rem 0; font-size: .875rem; }
+@media (max-width: 430px) { main { padding-top: 1.25rem; } h2 { font-size: 1.1rem; } }
+@media print { :root, body { background: white; color: black; } a, h2, .placeholder { color: black; } header, footer, .skip { display: none; } }

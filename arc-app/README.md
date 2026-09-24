@@ -14,6 +14,6 @@ ARC is a local-first, offline single-player progression app built with React, Vi
 
 Create a production web bundle with `npm run build`; synchronize it into the native projects with `npx cap sync`.
 
-ARC stores gameplay in its versioned IndexedDB savegame. Native credit purchases use StoreKit/Google Play Billing through environment-configured product identifiers; store prices always come from the native store response.
+ARC stores gameplay in its versioned IndexedDB savegame. Release 1 has no real-money purchases or advertising. Credits come from a free starting balance and gameplay rewards and can be spent on skins and module reloads.
 
 See [the architecture index](docs/architecture-index.md) for the current system boundaries.

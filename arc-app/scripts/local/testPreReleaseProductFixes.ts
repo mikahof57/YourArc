@@ -47,7 +47,7 @@ assert.match(calendar,/ARC_GROUP_CALENDARS_ACTIVE = false/);assert.match(calenda
 assert.match(calendar,/ARC_GROUP_CALENDARS_ACTIVE && isCreateGroupOpen/);assert.match(calendar,/ARC_GROUP_CALENDARS_ACTIVE && isManageGroupOpen/);
 const manifest=await read('android/app/src/main/AndroidManifest.xml');assert.match(manifest,/android:allowBackup="false"/);
 const settings=await read('src/components/Modals/SettingsModal.tsx');
-for(const copy of ['Data & Storage','Daten & Speicher','Export backup','Backup exportieren','Virtual currency & purchases','Privacy summary'])assert.match(settings,new RegExp(copy.replace(/[&]/g,'\\&')));
+for(const copy of ['Data & Storage','Daten & Speicher','Export backup','Backup exportieren','Gameplay Credits','Privacy summary'])assert.match(settings,new RegExp(copy.replace(/[&]/g,'\\&')));
 assert.match(settings,/aria-modal="true"/);assert.match(settings,/aria-label=/);
 for(const modal of ['src/components/HUD/TaskModal.tsx','src/components/Modals/ExtraModuleModal.tsx','src/components/Modals/StatsGraphModal.tsx','src/components/Modals/ArcMenuModal.tsx','src/components/Modals/ShopModal.tsx']){const source=await read(modal);assert.match(source,/aria-modal/);assert.match(source,/useModalAccessibility/);}
 const links=await read('src/config/releaseLinks.ts');assert.match(links,/configuredHttpsUrl/);assert.doesNotMatch(links,/example\.com/);

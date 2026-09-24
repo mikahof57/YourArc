@@ -1342,9 +1342,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <p className="text-slate-300 leading-relaxed">{lang === 'en'
                 ? 'ARC stores your profile and gameplay progress only on this device. There is currently no cloud sync. Uninstalling ARC, clearing app data or losing the device can remove progress, so keep a current backup.'
                 : 'ARC speichert dein Profil und deinen Spielfortschritt nur auf diesem Gerät. Es gibt derzeit keine Cloud-Synchronisierung. Beim Deinstallieren, Löschen der App-Daten oder Verlust des Geräts kann Fortschritt verloren gehen – bewahre daher ein aktuelles Backup auf.'}</p>
-              <p className="text-slate-400 leading-relaxed">{lang === 'en'
-                ? 'Consumed ARC Credit packs are recorded locally and may not be restorable after local data is lost.'
-                : 'Verbrauchte ARC-Credit-Pakete werden lokal erfasst und können nach Verlust lokaler Daten möglicherweise nicht wiederhergestellt werden.'}</p>
+
               <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={dataAction !== null} onClick={() => void handleExportBackup()} className="min-h-11 px-4 py-2 rounded bg-cyan-950 border border-cyan-500/40 text-cyan-200 flex items-center gap-2"><Download className="w-4 h-4" />{lang === 'en' ? 'Export backup' : 'Backup exportieren'}</button>
                 <button type="button" disabled={dataAction !== null} onClick={() => importInputRef.current?.click()} className="min-h-11 px-4 py-2 rounded bg-slate-800 border border-slate-700 text-slate-200 flex items-center gap-2"><Upload className="w-4 h-4" />{lang === 'en' ? 'Import backup' : 'Backup importieren'}</button>
@@ -1353,16 +1351,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {dataMessage && <p role="status" className="text-cyan-200">{dataMessage}</p>}
             </section>
             <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <h3 className="text-sm font-bold text-amber-300">{lang === 'en' ? 'Virtual currency & purchases' : 'Virtuelle Währung & Käufe'}</h3>
+              <h3 className="text-sm font-bold text-amber-300">{lang === 'en' ? 'Gameplay Credits' : 'Gameplay-Credits'}</h3>
               <p className="text-slate-300 leading-relaxed">{lang === 'en'
-                ? 'ARC Credits are virtual in-app currency with no cash value and cannot be transferred to other users or companion apps. Paid credit packs are consumable. Apple or Google provides the current store price and governs payment handling and applicable refunds. Restoration is limited once credits have been consumed locally.'
-                : 'ARC Credits sind eine virtuelle In-App-Währung ohne Geldwert und können nicht an andere Personen oder Begleit-Apps übertragen werden. Bezahlte Credit-Pakete sind Verbrauchsgüter. Apple oder Google zeigt den aktuellen Store-Preis an und regelt Zahlungsabwicklung sowie anwendbare Erstattungen. Nach lokalem Verbrauch ist eine Wiederherstellung nur eingeschränkt möglich.'}</p>
+                ? 'ARC Credits are an internal gameplay currency with no cash value. You receive a free starting balance and can earn more through missions and achievements. Spend them on skins and extra-module reloads. Credits cannot be bought with real money or transferred to other users or companion apps.'
+                : 'ARC Credits sind eine interne Spielwährung ohne Geldwert. Du erhältst ein kostenloses Startguthaben und kannst weitere Credits durch Missionen und Erfolge verdienen. Nutze sie für Skins und das Neuladen von Zusatz-Modulen. Credits können nicht mit echtem Geld gekauft oder an andere Personen oder Begleit-Apps übertragen werden.'}</p>
             </section>
             <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
               <h3 className="text-sm font-bold text-emerald-300">{lang === 'en' ? 'Privacy summary' : 'Datenschutz-Kurzinfo'}</h3>
               <p className="text-slate-300 leading-relaxed">{lang === 'en'
-                ? 'ARC has no developer account or login and does not send profile or gameplay data to an ARC backend. Apple/Google billing contacts the platform store during purchases. This build contains no ads, analytics or tracking.'
-                : 'ARC hat kein Entwicklerkonto und keinen Login und sendet Profil- oder Spieldaten nicht an ein ARC-Backend. Apple-/Google-Abrechnung kommuniziert bei Käufen mit dem Plattform-Store. Dieser Build enthält keine Werbung, Analysen oder Tracking.'}</p>
+                ? 'ARC has no developer account or login and does not send profile or gameplay data to an ARC backend. This build contains no ads, analytics or tracking.'
+                : 'ARC hat kein Entwicklerkonto und keinen Login und sendet Profil- oder Spieldaten nicht an ein ARC-Backend. Dieser Build enthält keine Werbung, Analysen oder Tracking.'}</p>
               <div className="flex flex-wrap gap-3 pt-1">
                 {([['privacy','Privacy Policy','Datenschutzerklärung'],['support','Support / Contact','Support / Kontakt'],['terms','Terms of Use','Nutzungsbedingungen'],['imprint','Legal Notice','Impressum']] as const).map(([key,en,de]) => ARC_RELEASE_LINKS[key] ? <a key={key} href={ARC_RELEASE_LINKS[key]!} target="_blank" rel="noreferrer" className="text-cyan-300 underline inline-flex items-center gap-1">{lang === 'en'?en:de}<ExternalLink className="w-3 h-3" /></a> : null)}
               </div>

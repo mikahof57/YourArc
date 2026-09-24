@@ -4,9 +4,8 @@ ARC uses Capacitor as a thin native shell around the existing offline React/Vite
 
 ## Runtime boundaries
 
-- Platform and lifecycle: `ArcNativeRuntimeService` coalesces concurrent foreground work and invokes the existing idempotent local ARC-day initializer. Background transitions do not mutate gameplay. Wheel, task, mission, achievement, companion, and economy rewards are never replayed by lifecycle code.
+- Platform and lifecycle: `ArcNativeRuntimeService` coalesces concurrent foreground work and invokes the existing idempotent local ARC-day initializer. Background transitions do not mutate gameplay. Task, mission, achievement, companion, and economy rewards are never replayed by lifecycle code.
 - Companion apps: the native transport port is disabled. A future transport must pass every envelope to `processCompanionEvent`, which delegates to the Phase-8 `LocalCompanionBridgeService`; it may not mutate saves directly.
-- Purchases: the IAP port models product loading, purchase/pending/verified results, restoration, and completion. Phase 9 ships an unavailable adapter—there are no StoreKit/Play Billing product IDs, purchase buttons, or fake verification.
 - Secure/native storage: the port is reserved for small native secrets or receipts. It is unavailable today and must never become a second gameplay store.
 - Deep links: the adapter recognizes only the reserved `arc:` scheme and exposes every link as `unhandled`. No production route or external event acceptance is active.
 
@@ -30,4 +29,4 @@ npm run native:ios
 npm run native:android
 ```
 
-`native:sync` builds the Vite bundle then copies it into both platform projects. iOS opening/building requires full Xcode (not only Command Line Tools) and CocoaPods/SPM support required by the installed Capacitor version. Android requires a supported JDK, Android Studio/SDK, and configured SDK tools. Portrait orientation is configured; native release signing, app-store metadata, icons/splash polish, IAP entitlements, and real companion/deep-link declarations are intentionally later work.
+`native:sync` builds the Vite bundle then copies it into both platform projects. iOS opening/building requires full Xcode (not only Command Line Tools) and CocoaPods/SPM support required by the installed Capacitor version. Android requires a supported JDK, Android Studio/SDK, and configured SDK tools. Portrait orientation is configured; native release signing, app-store metadata, icons/splash polish, real companion/deep-link declarations are intentionally later work.

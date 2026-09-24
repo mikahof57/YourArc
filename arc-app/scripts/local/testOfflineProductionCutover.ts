@@ -59,10 +59,6 @@ try {
   const bought = await game.purchaseAndEquip('data-scholar');
   assert.ok(bought.economy.inventoryItemIds.includes('data-scholar'));
   assert.equal(bought.economy.equippedSkinId, 'data-scholar');
-  const wheel = await game.claimWheel('2026-09-08', 0.2);
-  assert.equal(wheel.result.reward, 5);
-  await assert.rejects(() => game.claimWheel('2026-09-08', 0.2), /already_claimed/);
-
   await objectives.activateMission(2, { arcDay: '2026-09-08', occurredAt: now.toISOString() });
   const nextSave = (await repository.load())!;
   const nextAssignment = nextSave.progression.assignments.find((item) => item.stat_id === 'geld')!;
@@ -74,7 +70,6 @@ try {
   assert.equal(persisted.settings.language, 'de');
   assert.equal(persisted.calendar.privateEvents.at(-1)?.id, 'offline-event');
   assert.equal(persisted.weeklyRoutine[1]?.at(-1)?.id, 'offline-routine');
-  assert.equal(persisted.economy.wheel.lastClaimDate, '2026-09-08');
   assert.doesNotThrow(() => projectSaveToAppState(persisted, getInitialState()));
   assert.equal((await economy.load())?.saveId, initial.saveId);
 

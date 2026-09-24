@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { LocalEconomyService } from '../../src/features/economy/localEconomyService';
 import { ARC_LOCAL_SHOP_CATALOG } from '../../src/features/economy/localShopCatalog';
-import { applyReward, applyVerifiedExternalPurchase, claimWheelReward, credit, debit, equipItem, purchaseItem, spendForReload } from '../../src/features/economy/localEconomyDomain';
+import { applyReward, credit, debit, equipItem, purchaseItem, spendForReload } from '../../src/features/economy/localEconomyDomain';
 import { ArcSaveRepository, createNewArcSaveGame } from '../../src/features/savegame/arcSaveRepository';
 import { MemoryArcSaveStorage } from '../../src/features/savegame/arcSaveStorage';
-import { LocalGameService } from '../../src/features/runtime/localGameService';
-import { getWheelTargetSliceDegree } from '../../src/components/Modals/ShopModal';
-import { ARC_IAP_PRODUCT_CATALOG } from '../../src/features/economy/arcIapCatalog';
 
 {
   const save = createNewArcSaveGame();
@@ -32,23 +29,6 @@ import { ARC_IAP_PRODUCT_CATALOG } from '../../src/features/economy/arcIapCatalo
   assert.equal(save.economy.credits, 34); assert.equal(save.ui.moduleReloadsCountToday, 1);
 }
 
-{
-  const save = createNewArcSaveGame();
-  const first = claimWheelReward(save, '2026-09-08', 0.005); assert.equal(first.reward, 100);
-  assert.throws(() => claimWheelReward(save, '2026-09-08', 0.2), /already_claimed/);
-  assert.equal(claimWheelReward(save, '2026-09-09', 0.05).reward, 25);
-  assert.equal(claimWheelReward(save, '2026-09-10', 0.2).reward, 5);
-  assert.equal(claimWheelReward(save, '2026-09-11', 0.9).reward, 0);
-  const product = ARC_IAP_PRODUCT_CATALOG[0] as { appleProductId: string | null };
-  product.appleProductId = 'test.arc.credits.100';
-  const purchase = { externalPurchaseId: 'apple-tx-1', productId: 'test.arc.credits.100',
-    platform: 'ios' as const, purchaseTimestamp: '2026-09-08T12:00:00.000Z' };
-  const tx = applyVerifiedExternalPurchase(save, purchase);
-  const retry = applyVerifiedExternalPurchase(save, purchase);
-  assert.equal(tx.id, retry.id); assert.equal(save.economy.processedExternalPurchaseIds.length, 1);
-  assert.equal(tx.amount, 100, 'credit amount comes from trusted ARC product mapping');
-  product.appleProductId = null;
-}
 
 {
   const storage = new MemoryArcSaveStorage(); const repository = new ArcSaveRepository(storage);
@@ -86,35 +66,28 @@ import { ARC_IAP_PRODUCT_CATALOG } from '../../src/features/economy/arcIapCatalo
   assert.equal(recovered.source, 'recovered'); assert.equal(recovered.save.economy.credits, 17);
 }
 
-for (const scenario of [
-  { day: '2026-10-01', roll: 0.005, reward: 100, slice: 30 },
-  { day: '2026-10-02', roll: 0.05, reward: 25, slice: 150 },
-  { day: '2026-10-03', roll: 0.2, reward: 5, slice: 270 },
-  { day: '2026-10-04', roll: 0.9, reward: 0, slice: 90 },
-]) {
+// Retired wheel data remains inert and must never invalidate/reset a save.
+{
   const storage = new MemoryArcSaveStorage();
   const repository = new ArcSaveRepository(storage);
-  const initial = createNewArcSaveGame();
-  await repository.save(initial);
-  const game = new LocalGameService(repository);
-  const claimed = await game.claimWheel(scenario.day, scenario.roll);
-  assert.equal(claimed.result.reward, scenario.reward, 'the visual result uses the settled reward');
-  assert.equal(getWheelTargetSliceDegree(claimed.result.reward), scenario.slice, 'the wheel lands on the settled reward slice');
-  assert.equal(claimed.result.balance, initial.economy.credits + scenario.reward);
-  assert.equal(claimed.save.economy.credits, initial.economy.credits + scenario.reward, 'Spin has no fixed 10-credit grant');
-  const wheelTransactions = claimed.save.economy.transactions.filter((entry) => entry.referenceId === `daily_wheel:${scenario.day}`);
-  assert.equal(wheelTransactions.length, scenario.reward > 0 ? 1 : 0);
-  if (scenario.reward > 0) {
-    assert.equal(wheelTransactions[0].amount, scenario.reward);
-    assert.equal(wheelTransactions[0].balanceAfter, claimed.result.balance);
-  }
-  assert.deepEqual(claimed.save.economy.wheel.claimHistory.filter((entry) => entry.date === scenario.day).map((entry) => entry.reward), [scenario.reward]);
-  await assert.rejects(() => game.claimWheel(scenario.day, scenario.roll), /already_claimed/);
-  const restarted = new LocalGameService(new ArcSaveRepository(storage));
-  await assert.rejects(() => restarted.claimWheel(scenario.day, scenario.roll), /already_claimed/);
-  const persisted = await repository.load();
-  assert.equal(persisted?.economy.credits, initial.economy.credits + scenario.reward);
-  assert.equal(persisted?.economy.wheel.claimHistory.filter((entry) => entry.date === scenario.day).length, 1);
+  const legacy = createNewArcSaveGame();
+  const reward = credit(legacy, { type: 'daily_wheel', source: 'local_wheel', amount: 25,
+    referenceId: 'daily_wheel:2026-09-08' });
+  legacy.economy.wheel = { lastClaimDate: '2026-09-08', claimHistory: [
+    { date: '2026-09-08', reward: 25, transactionId: reward.id },
+  ] };
+  purchaseItem(legacy, 'data-scholar', 'legacy-skin');
+  equipItem(legacy, 'data-scholar');
+  await repository.save(legacy);
+  const restarted = new ArcSaveRepository(storage);
+  const loaded = await restarted.initialize();
+  assert.equal(loaded.save.saveId, legacy.saveId);
+  assert.deepEqual(loaded.save.economy, legacy.economy);
+  await restarted.transaction(save => { save.profile.name = 'Still here'; });
+  const reloaded = await restarted.load();
+  assert.deepEqual(reloaded?.economy, legacy.economy, 'legacy history, Credits, inventory and equipped skin survive normal saves');
+  assert.equal(reloaded?.profile.name, 'Still here');
+  assert.equal('claimWheelReward' in new LocalEconomyService(restarted), false);
 }
 
 assert.equal(ARC_LOCAL_SHOP_CATALOG.filter((item) => item.type === 'skin' && item.available).length, 22);

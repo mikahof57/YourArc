@@ -210,6 +210,7 @@ function refreshDerivedAchievementState(save: ArcSaveGame, snapshot: Achievement
   snapshot.uniqueSkinIds = [...new Set(save.economy.inventory.filter((item) => item.itemType === 'skin').map((item) => item.itemId))];
   snapshot.skinTiers = Object.fromEntries(snapshot.uniqueSkinIds.map((itemId) => [itemId, String(getLocalShopItem(itemId)?.metadata.tier ?? '')]));
   snapshot.gameplayCredits = save.economy.transactions
+    // Historical rewards still count so existing achievement progress is preserved.
     .filter((entry) => entry.amount > 0 && ['daily_wheel', 'mission_reward'].includes(entry.type))
     .reduce((sum, entry) => sum + entry.amount, 0);
 }

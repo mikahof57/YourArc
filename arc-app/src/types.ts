@@ -236,7 +236,7 @@ export interface AppState {
   lastDailyBonusDate?: string; // YYYY-MM-DD when last daily bonus was granted
   ownedSkinIds?: string[]; // IDs of skins owned by user
   equippedSkinId?: string; // Currently equipped skin ID
-  lastWheelSpinDate?: string; // YYYY-MM-DD when last daily wheel spin occurred
+  lastWheelSpinDate?: string; // Deprecated: read only when migrating legacy saves.
   hasUnlockedDesignCustomizer?: boolean; // Whether user purchased design customizer feature
   unlockedDesignColors?: string[]; // List of hex color codes unlocked individually by user
   selectedDesignColors?: string[]; // Up to 3 selected hex/color IDs e.g. ['#f59e0b', '#06b6d4']

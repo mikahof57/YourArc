@@ -1,6 +1,6 @@
 import type { ArcSaveRepository } from '../savegame/arcSaveRepository';
-import { applyReward, applyVerifiedExternalPurchase, claimWheelReward, credit, debit, equipItem,
-  grantItem, purchaseItem, spendForReload, unequipItem, type ArcEconomyEntryInput, type ArcVerifiedExternalPurchase } from './localEconomyDomain';
+import { applyReward, credit, debit, equipItem,
+  grantItem, purchaseItem, spendForReload, unequipItem, type ArcEconomyEntryInput } from './localEconomyDomain';
 import { getLocalShopItem, type ArcShopItemType } from './localShopCatalog';
 
 /** Atomic local economy API backed exclusively by ArcSaveRepository. */
@@ -16,10 +16,8 @@ export class LocalEconomyService {
   }); }
   equipItem(itemId: string) { return this.saves.transaction((save) => equipItem(save, itemId)); }
   unequipItem(type: ArcShopItemType) { return this.saves.transaction((save) => unequipItem(save, type)); }
-  claimWheelReward(arcDay: string, roll?: number) { return this.saves.transaction((save) => { claimWheelReward(save, arcDay, roll); }); }
   spendForReload(operationId: string, cost = 1) { return this.saves.transaction((save) => { spendForReload(save, operationId, cost); }); }
   applyReward(rewardId: string, amount: number, source: 'mission' | 'achievement' | 'other', metadata?: Record<string, unknown>) {
     return this.saves.transaction((save) => { applyReward(save, rewardId, amount, source, metadata); });
   }
-  applyVerifiedExternalPurchase(purchase: ArcVerifiedExternalPurchase) { return this.saves.transaction((save) => { applyVerifiedExternalPurchase(save, purchase); }); }
 }

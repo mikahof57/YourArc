@@ -1422,11 +1422,6 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   background: #07080d !important;
   box-shadow: 0 9px 18px rgba(0,0,0,.48), inset 0 1px rgba(255,255,255,.03) !important;
 }
-.arc-shop-canvas .arc-shop-credit-shelf {
-  border-color: #68551b !important;
-  background: #241b03 !important;
-  box-shadow: 0 9px 18px rgba(0,0,0,.48), inset 0 0 18px rgba(255,194,28,.065), inset 0 1px rgba(255,255,255,.04) !important;
-}
 .arc-shop-canvas .arc-shop-category-section--skins {
   border-color: #174a5e !important;
   background: #042435 !important;
@@ -1485,8 +1480,7 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   background: color-mix(in srgb,var(--skin-collection-accent) 10%,#090a10);
   color: var(--skin-collection-accent);
 }
-.arc-shop-canvas .arc-shop-category-section::after,
-.arc-shop-canvas .arc-shop-credit-shelf::after {
+.arc-shop-canvas .arc-shop-category-section::after {
   content: "";
   position: absolute;
   left: 0;
@@ -1498,8 +1492,7 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   opacity: .74;
   pointer-events: none;
 }
-.arc-shop-canvas .arc-shop-category-section::before,
-.arc-shop-canvas .arc-shop-credit-shelf::before {
+.arc-shop-canvas .arc-shop-category-section::before {
   content:"";
   position:absolute;
   right:-1px;
@@ -1511,7 +1504,6 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   pointer-events:none;
 }
 .arc-shop-canvas .arc-shop-category-section--skins { --shop-section-accent:#00c7ff; --shelf-ornament:var(--arc-ornament-precision); }
-.arc-shop-canvas .arc-shop-credit-shelf { --shop-section-accent:#ffc21c; --shelf-ornament:var(--arc-ornament-modular); }
 .arc-shop-canvas .arc-shop-catalog h3,
 .arc-shop-canvas .arc-shop-catalog h4,
 .arc-shop-canvas .arc-shop-economy-system h3 {
@@ -1520,8 +1512,7 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   letter-spacing: .035em;
 }
 .arc-shop-canvas .arc-shop-shelf header > div > span,
-.arc-shop-canvas .arc-shop-catalog h4 span,
-.arc-shop-canvas .arc-shop-exchange > div:first-child > span {
+.arc-shop-canvas .arc-shop-catalog h4 span {
   font-family: var(--arc-font-system);
   letter-spacing: .08em !important;
 }
@@ -1599,79 +1590,11 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   background: #05060b !important;
 }
 .arc-shop-canvas .arc-shop-product-art img { object-fit: cover; filter: contrast(1.08) saturate(1.05) !important; }
-.arc-shop-canvas .arc-shop-product-card button,
-.arc-shop-canvas .arc-shop-credit-packages > button {
+.arc-shop-canvas .arc-shop-product-card button {
   position: relative;
   border-radius: 1px !important;
   box-shadow: 0 4px 8px rgba(0,0,0,.4), inset 0 1px rgba(255,255,255,.04) !important;
 }
-.arc-shop-canvas .arc-shop-credit-packages { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
-.arc-shop-canvas .arc-shop-credit-packages > button {
-  display: grid;
-  grid-template-columns: 26px minmax(0,1fr) auto;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  padding: 10px 12px;
-  overflow: hidden;
-  border: 1px solid #6b571a !important;
-  border-radius: 3px 8px 3px 8px !important;
-  background: #302303 !important;
-  box-shadow: 0 7px 13px rgba(0,0,0,.48), inset 0 0 16px rgba(255,194,28,.075), inset 0 0 0 1px rgba(255,194,28,.14), inset 0 1px rgba(255,255,255,.065) !important;
-  text-align: left;
-}
-.arc-shop-canvas .arc-shop-credit-packages > button::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: var(--credit-rail-length,var(--arc-card-ornament-medium));
-  height: 7px;
-  background:
-    linear-gradient(#ffd236,#ffd236) 0 0/64% 1px no-repeat,
-    linear-gradient(#ffd236,#ffd236) 64% 0/1px 3px no-repeat,
-    linear-gradient(#ffd236,#ffd236) 64% 2px/28% 1px no-repeat,
-    linear-gradient(#9b7d20,#9b7d20) 8px 5px/48% 1px no-repeat,
-    linear-gradient(#ffd236,#ffd236) 0 0/1px 7px no-repeat;
-  opacity: .6;
-  pointer-events: none;
-}
-.arc-shop-canvas .arc-shop-credit-packages > button:nth-child(2) { --credit-rail-length:26px; }
-.arc-shop-canvas .arc-shop-credit-packages > button:nth-child(2)::before { left:auto; right:0; transform:scaleX(-1); }
-.arc-shop-canvas .arc-shop-credit-packages > button:nth-child(3) { --credit-rail-length:38px; }
-.arc-shop-canvas .arc-credit-package-icon { width: 22px; height: 22px; color: #ffc21c; }
-.arc-shop-canvas .arc-credit-package-copy { display: flex; min-width: 0; flex-direction: column; }
-.arc-shop-canvas .arc-credit-package-amount {
-  color: #f7f7f8;
-  font: 900 clamp(1rem,1.6vw,1.35rem)/1 var(--arc-font-system);
-  letter-spacing: -.035em;
-}
-.arc-shop-canvas .arc-credit-package-label {
-  margin-top: 3px;
-  color: #d3ad3e;
-  font: 800 .58rem/1 var(--arc-font-interface);
-  letter-spacing: .07em;
-  text-transform: uppercase;
-}
-.arc-shop-canvas .arc-credit-package-price {
-  color: #fff0ae;
-  font: 850 .82rem/1 var(--arc-font-system);
-  white-space: nowrap;
-}
-.arc-shop-canvas .arc-shop-exchange-package {
-  min-width: 0;
-  border-radius: 4px 10px 4px 10px !important;
-  background: #1b1606 !important;
-  box-shadow: 0 8px 15px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.035) !important;
-}
-.arc-shop-canvas .arc-shop-exchange-package-title {
-  overflow-wrap: normal;
-  font-family: var(--arc-font-interface);
-  line-height: 1.25;
-}
-.arc-shop-canvas .arc-shop-wheel,
-.arc-shop-canvas .arc-shop-exchange { padding: 16px !important; border: 1px solid #292b33 !important; background: #07080d !important; }
-.arc-shop-canvas .arc-shop-wheel * { backdrop-filter: none !important; }
 
 /* Pass 17: precision ornament grammar — long rails for architecture,
    compact signatures for controls, and no detached decorative fragments. */
@@ -1762,8 +1685,7 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   opacity: .58;
 }
 .arc-shop-canvas .arc-shop-navigation::after { transform: rotate(180deg); }
-.arc-shop-canvas .arc-shop-category-section::after,
-.arc-shop-canvas .arc-shop-credit-shelf::after {
+.arc-shop-canvas .arc-shop-category-section::after {
   width: clamp(80px,22%,200px);
   height: 6px;
   clip-path: none;
@@ -1773,8 +1695,7 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
     linear-gradient(var(--shop-section-accent,#ffc21c),var(--shop-section-accent,#ffc21c)) 0 0/1px 6px no-repeat;
   opacity: .62;
 }
-.arc-shop-canvas .arc-shop-category-section::before,
-.arc-shop-canvas .arc-shop-credit-shelf::before { width: 2px; height: 16px; }
+.arc-shop-canvas .arc-shop-category-section::before { width: 2px; height: 16px; }
 @media (max-width: 699px) {
   .arc-shop-canvas { padding: 10px; }
   .arc-shop-canvas .arc-shop-header { grid-template-columns: minmax(0,1fr) auto !important; gap: 10px !important; }
@@ -1826,7 +1747,6 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   .arc-shop-canvas .arc-shop-economy-system { margin-top: 10px !important; }
   .arc-shop-canvas .arc-shop-product-card { flex-basis: min(76vw,270px); }
   .arc-shop-canvas .arc-shop-product-art { height: 220px !important; }
-  .arc-shop-canvas .arc-shop-credit-packages { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -1842,14 +1762,12 @@ html { scroll-padding-bottom: var(--arc-content-bottom-clearance); }
   .arc-quick-access-grid > button::after,
   .arc-shop-canvas .arc-shop-navigation::after,
   .arc-shop-canvas .arc-shop-category-section::before,
-  .arc-shop-canvas .arc-shop-credit-shelf::before,
   .arc-shop-canvas .arc-shop-product-card::after { display:none; }
   .arc-v10-profile .arc-attribute-card::before { width:min(var(--attribute-rail-length,30px),30px); }
   .arc-v10-missions .arc-mission-card::before { width:min(var(--task-rail-length,38px),38px); }
   .arc-progress-summaries > .arc-summary-card::before { width:min(var(--ornament-length,34px),34px); }
   .arc-quick-access-grid > button::before { width:min(var(--ornament-length,20px),20px); }
-  .arc-shop-canvas .arc-shop-product-card::before,
-  .arc-shop-canvas .arc-shop-credit-packages > button::before { width:28px; }
+  .arc-shop-canvas .arc-shop-product-card::before { width:28px; }
   .arc-progress-summaries { gap: 5px !important; }
   .arc-progress-summaries > .arc-summary-card {
     min-height: 96px;

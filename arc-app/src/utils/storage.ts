@@ -55,7 +55,6 @@ export function getInitialState(): AppState {
     lastDailyBonusDate: today,
     ownedSkinIds: [],
     equippedSkinId: '',
-    lastWheelSpinDate: '',
     calendarState: {
       privateEvents: [
         {
@@ -116,9 +115,6 @@ export function loadAppState(): AppState {
     }
     if (parsed.equippedSkinId === undefined) {
       parsed.equippedSkinId = '';
-    }
-    if (!parsed.lastWheelSpinDate) {
-      parsed.lastWheelSpinDate = '';
     }
     if (!parsed.unlockedDesignColors) {
       parsed.unlockedDesignColors = ['#06b6d4', '#f59e0b'];

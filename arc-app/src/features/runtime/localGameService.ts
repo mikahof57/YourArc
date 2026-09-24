@@ -7,7 +7,7 @@ import { getTodayDateString } from '../../utils/storage';
 import { emptyAchievementSnapshot } from '../achievements/achievementEngine';
 import { completeAssignment, initializeArcDay, initializeCharacter, resetCharacterProgression, type ArcCharacterInitializationInput } from '../progression/localProgressionDomain';
 import { evaluateLocalAchievements, recordLocalObjectiveActivity } from '../objectives/localObjectivesDomain';
-import { claimWheelReward, equipItem, purchaseItem, spendForReload } from '../economy/localEconomyDomain';
+import { equipItem, purchaseItem, spendForReload } from '../economy/localEconomyDomain';
 import { createArcId, type ArcSaveGame } from '../savegame/arcSaveGame';
 import type { ArcSaveRepository } from '../savegame/arcSaveRepository';
 
@@ -64,7 +64,6 @@ export function projectSaveToAppState(save: ArcSaveGame, previous: AppState): Ap
     consecutiveLoginDays: save.progression.loginStreak,
     ownedSkinIds: [...save.economy.inventoryItemIds],
     equippedSkinId: save.economy.equippedSkinId,
-    lastWheelSpinDate: save.economy.wheel.lastClaimDate ?? '',
     selectedDesignColors: [...save.settings.selectedDesignColors],
     unlockedDesignColors: [...save.settings.unlockedDesignColors],
     purchasedAnimationIds: [...save.settings.purchasedAnimationIds],
@@ -138,13 +137,6 @@ export class LocalGameService {
       equipItem(save, itemId);
       await evaluateLocalAchievements(save);
     });
-  }
-
-  claimWheel(arcDay: string, roll?: number) {
-    let result: ReturnType<typeof claimWheelReward> | null = null;
-    return this.saves.transaction((save) => {
-      result = claimWheelReward(save, arcDay, roll);
-    }).then((save) => ({ save, result: result! }));
   }
 
   spendForModuleReload(moduleId: string, operationId: string, newSeenIds: string[]) {

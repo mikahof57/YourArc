@@ -11,7 +11,6 @@ export interface ArcLocalShopItem {
   assetReference: string | null;
   available: boolean;
   defaultOwned: boolean;
-  futureIapProductId?: string;
   metadata: Record<string, unknown>;
 }
 

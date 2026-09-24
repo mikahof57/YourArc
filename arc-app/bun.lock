@@ -8,7 +8,6 @@
         "@capacitor/app": "^8.1.1",
         "@capacitor/core": "^8.5.1",
         "canvas-confetti": "^1.9.4",
-        "capacitor-plugin-cdv-purchase": "^13.18.0",
         "lucide-react": "^0.546.0",
         "react": "^19.0.1",
         "react-dom": "^19.0.1",
@@ -320,7 +319,6 @@
 
     "canvas-confetti": ["canvas-confetti@1.9.4", "", {}, "sha512-yxQbJkAVrFXWNbTUjPqjF7G+g6pDotOUHGbkZq2NELZUMDpiJ85rIEazVb8GTaAptNW2miJAXbs1BtioA251Pw=="],
 
-    "capacitor-plugin-cdv-purchase": ["capacitor-plugin-cdv-purchase@13.18.0", "", { "peerDependencies": { "@capacitor/core": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-9OJvDqI1voFv2dM7yE2Vmc/5cw1dLF6J3o32sFsfGytyxYNCAgJnff1vecOgTQFfyDm+BHVrb+eJQ0eX9OmSqg=="],
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 

@@ -18,7 +18,6 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.1",
     "canvas-confetti": "^1.9.4",
-    "capacitor-plugin-cdv-purchase": "^13.18.0",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",

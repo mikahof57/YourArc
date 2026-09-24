@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { ArcNativeRuntimeService } from '../../src/features/native/nativeRuntimeService';
-import { disabledCompanionTransport, normalizePlatform, parseArcDeepLink, unsupportedIap, unsupportedSecureStorage } from '../../src/features/native/nativeRuntimeAdapter';
+import { disabledCompanionTransport, normalizePlatform, parseArcDeepLink, unsupportedSecureStorage } from '../../src/features/native/nativeRuntimeAdapter';
 import type { ArcLifecycleState, ArcNativeRuntimeAdapter, ArcPlatform } from '../../src/features/native/nativeRuntimeTypes';
 import { ArcSaveRepository } from '../../src/features/savegame/arcSaveRepository';
 import { MemoryArcSaveStorage } from '../../src/features/savegame/arcSaveStorage';
 import { LocalCompanionBridgeService } from '../../src/features/companion/localCompanionBridgeService';
 
 class ControlledAdapter implements ArcNativeRuntimeAdapter {
-  readonly iap = unsupportedIap;
   readonly secureStorage = unsupportedSecureStorage;
   readonly companionTransport = disabledCompanionTransport;
   private lifecycle: ((state: ArcLifecycleState) => void) | null = null;
@@ -38,7 +37,7 @@ for (const platform of ['web', 'ios', 'android'] as const) {
     return (await repository.load()) ?? undefined;
   }, new LocalCompanionBridgeService(repository));
   assert.equal(service.platform(), platform);
-  assert.deepEqual(service.capabilities(), { iap: false, secureStorage: false, companionTransport: false });
+  assert.deepEqual(service.capabilities(), { secureStorage: false, companionTransport: false });
   const stop = await service.start(() => undefined);
   adapter.emit('background');
   assert.equal(initializations, 0);
@@ -49,7 +48,6 @@ for (const platform of ['web', 'ios', 'android'] as const) {
   assert.deepEqual(await repository.load(), before, `${platform} detection/lifecycle must not mutate gameplay by itself`);
   const rejected = await service.processCompanionEvent({ source_app: 'forged' });
   assert.equal(rejected.accepted, false, 'native companion ingress must retain Phase-8 validation');
-  await assert.rejects(() => adapter.iap.purchase('fake-product'), /not_available/);
   stop();
 }
 

@@ -134,6 +134,7 @@ export interface ArcSaveGame {
     processedExternalPurchaseIds: string[];
     equippedSkinId: string;
     equippedItemIds: Record<string, string | null>;
+    /** Deprecated compatibility data; never used to grant new rewards. */
     wheel: {
       lastClaimDate: string | null;
       claimHistory: Array<{ date: string; reward: number; transactionId: string | null }>;

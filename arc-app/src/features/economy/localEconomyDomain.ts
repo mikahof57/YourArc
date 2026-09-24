@@ -1,6 +1,5 @@
 import type { ArcEconomyTransaction, ArcInventoryItem, ArcSaveGame } from '../savegame/arcSaveGame';
 import { getLocalShopItem, isDefaultLocalItem, type ArcLocalShopItem, type ArcShopItemType } from './localShopCatalog';
-import { getArcIapProductByStoreId, type ArcIapPlatform } from './arcIapCatalog';
 
 export interface ArcEconomyEntryInput {
   type: string;
@@ -9,17 +8,8 @@ export interface ArcEconomyEntryInput {
   referenceId: string;
   itemId?: string;
   rewardId?: string;
-  externalPurchaseId?: string;
   metadata?: Record<string, unknown>;
   createdAt?: string;
-}
-
-export interface ArcVerifiedExternalPurchase {
-  externalPurchaseId: string;
-  productId: string;
-  platform: ArcIapPlatform;
-  purchaseTimestamp: string;
-  metadata?: Record<string, unknown>;
 }
 
 const validText = (value: string) => typeof value === 'string' && value.trim().length > 0;
@@ -43,13 +33,11 @@ function append(save: ArcSaveGame, input: ArcEconomyEntryInput): ArcEconomyTrans
     referenceId: input.referenceId, createdAt: input.createdAt ?? new Date().toISOString(),
     ...(input.itemId ? { itemId: input.itemId } : {}),
     ...(input.rewardId ? { rewardId: input.rewardId } : {}),
-    ...(input.externalPurchaseId ? { externalPurchaseId: input.externalPurchaseId } : {}),
     metadata: structuredClone(input.metadata ?? {}),
   };
   save.economy.credits = after;
   save.economy.transactions.push(transaction);
   save.economy.processedReferenceIds.push(input.referenceId);
-  if (input.externalPurchaseId) save.economy.processedExternalPurchaseIds.push(input.externalPurchaseId);
   return transaction;
 }
 
@@ -110,41 +98,4 @@ export function spendForReload(save: ArcSaveGame, operationId: string, cost = 1)
   const transaction = debit(save, { type: 'module_reload', source: 'extra_module', amount: cost, referenceId, metadata: { operationId } });
   save.ui.moduleReloadsCountToday += 1;
   return transaction;
-}
-
-export function claimWheelReward(save: ArcSaveGame, arcDay: string, roll?: number): { reward: number; balance: number; transaction: ArcEconomyTransaction | null } {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(arcDay)) throw new Error('arc_local_wheel_day_invalid');
-  if (save.economy.wheel.claimHistory.some((claim) => claim.date === arcDay)) throw new Error('arc_local_wheel_already_claimed');
-  const value = roll ?? randomUnit();
-  if (!Number.isFinite(value) || value < 0 || value >= 1) throw new Error('arc_local_wheel_roll_invalid');
-  const reward = value < 0.01 ? 100 : value < 0.11 ? 25 : value < 0.51 ? 5 : 0;
-  const referenceId = `daily_wheel:${arcDay}`;
-  const transaction = reward > 0 ? credit(save, { type: 'daily_wheel', source: 'local_wheel', amount: reward,
-    rewardId: arcDay, referenceId, metadata: { reward, arcDay } }) : null;
-  save.economy.wheel.lastClaimDate = arcDay;
-  save.economy.wheel.claimHistory.push({ date: arcDay, reward, transactionId: transaction?.id ?? null });
-  return { reward, balance: save.economy.credits, transaction };
-}
-
-function randomUnit(): number {
-  const values = new Uint32Array(1);
-  if (globalThis.crypto?.getRandomValues) { globalThis.crypto.getRandomValues(values); return values[0] / 0x1_0000_0000; }
-  return Math.random();
-}
-
-/** Caller must provide a purchase already verified by a future native platform adapter. */
-export function applyVerifiedExternalPurchase(save: ArcSaveGame, purchase: ArcVerifiedExternalPurchase): ArcEconomyTransaction {
-  const product = getArcIapProductByStoreId(purchase.platform, purchase.productId);
-  if (!validText(purchase.externalPurchaseId) || !validText(purchase.productId)
-    || !['ios', 'android'].includes(purchase.platform) || !product
-    || Number.isNaN(Date.parse(purchase.purchaseTimestamp))) throw new Error('arc_local_iap_event_invalid');
-  const identities = [purchase.externalPurchaseId, purchase.metadata?.transactionId,
-    purchase.metadata?.orderId, purchase.metadata?.purchaseToken].filter((value): value is string => validText(String(value ?? '')));
-  const existing = save.economy.transactions.find((entry) => entry.externalPurchaseId === purchase.externalPurchaseId
-    || identities.some((identity) => [entry.externalPurchaseId, entry.metadata.transactionId,
-      entry.metadata.orderId, entry.metadata.purchaseToken].includes(identity)));
-  if (existing) return existing;
-  return credit(save, { type: 'iap_credit_grant', source: purchase.platform, amount: product.credits,
-    externalPurchaseId: purchase.externalPurchaseId, referenceId: `iap:${purchase.platform}:${purchase.externalPurchaseId}`,
-    createdAt: purchase.purchaseTimestamp, metadata: { productId: purchase.productId, ...(purchase.metadata ?? {}) } });
 }

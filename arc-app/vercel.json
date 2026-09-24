@@ -1,6 +1,6 @@
 {
-  "buildCommand": "npm --prefix arc-app run build",
-  "outputDirectory": "arc-app/dist",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/privacy",
@@ -30,6 +30,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "installCommand": "npm --prefix arc-app ci"
+  ]
 }

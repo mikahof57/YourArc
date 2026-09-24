@@ -16,8 +16,6 @@ assert.doesNotMatch(appSource, /onToggleDesignColor|onEquipAnimation/);
 assert.match(homeSource, /localObjectivesService\.getMissions/);
 assert.doesNotMatch(`${homeSource}\n${missionSource}`, /not connected|authoritative progression|server connection|Serververbindung|follow on reconnect/i);
 assert.match(appSource, /getLocalizedModuleConfig\(module, lang\)/);
-assert.match(shopSource, /getWheelTargetSliceDegree\(reward\)/);
-assert.doesNotMatch(gameSource.match(/claimWheel\(arcDay:[\s\S]*?\n  \}/u)?.[0] ?? '', /evaluateLocalAchievements/);
 
 const expected = {
   motivation: ['Motivationssprüche', 'Motivational Quotes'],
@@ -35,3 +33,5 @@ for (const module of ALL_EXTRA_MODULES) {
 }
 
 console.log('ARC Phase 6 manual-QA static/localization tests passed.');
+
+assert.doesNotMatch(shopSource + gameSource, /wheel|glücksrad/i);

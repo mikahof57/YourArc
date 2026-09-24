@@ -1,5 +1,5 @@
 import type { LocalCompanionBridgeService } from '../companion/localCompanionBridgeService';
-import type { ArcNativePurchaseResult, ArcNativeRuntimeAdapter, ArcPlatform } from './nativeRuntimeTypes';
+import type { ArcNativeRuntimeAdapter, ArcPlatform } from './nativeRuntimeTypes';
 import type { ArcSaveGame } from '../savegame/arcSaveGame';
 
 export class ArcNativeRuntimeService {
@@ -15,15 +15,10 @@ export class ArcNativeRuntimeService {
   platform(): ArcPlatform { return this.adapter.platform(); }
   capabilities() {
     return {
-      iap: this.adapter.iap.available,
       secureStorage: this.adapter.secureStorage.available,
       companionTransport: this.adapter.companionTransport.available,
     };
   }
-  loadIapProducts(productIds: readonly string[]) { return this.adapter.iap.loadProducts(productIds); }
-  purchaseIapProduct(productId: string) { return this.adapter.iap.purchase(productId); }
-  reconcileIapPurchases() { return this.adapter.iap.reconcile(); }
-  finishIapPurchase(purchase: ArcNativePurchaseResult) { return this.adapter.iap.finish(purchase); }
 
   /** Native ingress must always pass through the Phase-8 validation/domain boundary. */
   processCompanionEvent(event: unknown) { return this.companionBridge.processEvent(event); }

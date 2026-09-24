@@ -9,35 +9,6 @@ export interface ArcDeepLink {
   route: 'unhandled';
 }
 
-export interface ArcNativePurchaseProduct {
-  id: string;
-  displayName: string;
-  description: string;
-  displayPrice: string;
-  currencyCode?: string;
-}
-export interface ArcNativePurchaseResult {
-  productId: string;
-  state: 'pending' | 'confirmed' | 'cancelled';
-  externalPurchaseId?: string;
-  purchaseTimestamp?: string;
-  transactionId?: string;
-  originalTransactionId?: string;
-  purchaseToken?: string;
-  orderId?: string;
-  storeEnvironment?: string;
-  acknowledged?: boolean;
-  consumed?: boolean;
-}
-
-export interface ArcNativeIapPort {
-  readonly available: boolean;
-  loadProducts(productIds: readonly string[]): Promise<ArcNativePurchaseProduct[]>;
-  purchase(productId: string): Promise<ArcNativePurchaseResult>;
-  reconcile(): Promise<ArcNativePurchaseResult[]>;
-  finish(confirmedPurchase: ArcNativePurchaseResult): Promise<void>;
-}
-
 export interface ArcNativeSecureStoragePort {
   readonly available: boolean;
   get(key: string): Promise<string | null>;
@@ -55,7 +26,6 @@ export interface ArcNativeRuntimeAdapter {
   platform(): ArcPlatform;
   addLifecycleListener(listener: (state: ArcLifecycleState) => void): Promise<() => void>;
   addDeepLinkListener(listener: (link: ArcDeepLink) => void): Promise<() => void>;
-  iap: ArcNativeIapPort;
   secureStorage: ArcNativeSecureStoragePort;
   companionTransport: ArcNativeCompanionTransportPort;
 }

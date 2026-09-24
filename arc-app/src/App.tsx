@@ -43,7 +43,6 @@ import { getLocalRestdayOptions, mapLocalAssignmentToTaskItem, projectSaveToAppS
 import { ARC_CANONICAL_STAT_IDS, type ArcCanonicalStatId } from './features/savegame/arcSaveGame';
 import { getLocalizedTitleName } from './features/achievements/achievementLocalization';
 import { nativeRuntimeService } from './services/nativeRuntimeService';
-import { localIapService } from './services/localIapService';
 import { importLocalArcBackup, shareOrDownloadArcBackup } from './services/localBackupService';
 
 function getErrorMessage(error: unknown): string {
@@ -96,13 +95,6 @@ export default function App() {
   const handleMissionCreditBalance = useCallback((balance: number) => {
     setAppState((previous) => previous.credits === balance ? previous : { ...previous, credits: balance });
   }, []);
-  const loadIapProducts = useCallback(() => localIapService.loadProducts(lang), [lang]);
-  const purchaseIapProduct = useCallback(async (productId: string) => {
-    const outcome = await localIapService.purchase(productId);
-    if (outcome.state === 'success') setAppState((previous) => projectSaveToAppState(outcome.save, previous));
-    return outcome;
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     setArcInitializationStatus('loading');
@@ -135,16 +127,9 @@ export default function App() {
     if (arcInitializationStatus !== 'initialized') return;
     let cancelled = false;
     let stop = () => undefined;
-    const reconcilePurchases = async () => {
-      const outcomes = await localIapService.reconcile();
-      const latest = outcomes.filter((outcome) => outcome.state === 'success').at(-1);
-      if (latest?.state === 'success' && !cancelled) setAppState((previous) => projectSaveToAppState(latest.save, previous));
-    };
-    void reconcilePurchases().catch((error) => console.warn('ARC purchase reconciliation unavailable:', error));
     void nativeRuntimeService.start(async (save) => {
       if (cancelled) return;
       if (save && !cancelled) setAppState((previous) => projectSaveToAppState(save, previous));
-      await reconcilePurchases().catch((error) => console.warn('ARC purchase reconciliation unavailable:', error));
     }).then((cleanup) => { if (cancelled) cleanup(); else stop = cleanup; });
     return () => { cancelled = true; stop(); };
   }, [arcInitializationStatus]);
@@ -460,7 +445,6 @@ export default function App() {
           currentCredits={appState.credits ?? 0}
           ownedSkinIds={appState.ownedSkinIds || []}
           equippedSkinId={appState.equippedSkinId || ''}
-          lastWheelSpinDate={appState.lastWheelSpinDate || ''}
           onBuySkin={async (skin) => {
             const save = await localGameService.purchaseAndEquip(skin.id);
             playSoundEffect('levelup');
@@ -473,17 +457,6 @@ export default function App() {
             playSoundEffect('click');
             setAppState((previous) => projectSaveToAppState(save, previous));
           }}
-          onClaimDailyWheel={async () => {
-            const today = getTodayDateString();
-            const claimed = await localGameService.claimWheel(today);
-            playSoundEffect('levelup');
-            setAppState((previous) => projectSaveToAppState(claimed.save, previous));
-            return { reward: claimed.result.reward, balance: claimed.result.balance };
-          }}
-          iapAvailable={localIapService.isAvailable()}
-          nativePlatform={nativeRuntimeService.platform()}
-          onLoadCreditProducts={loadIapProducts}
-          onPurchaseCredits={purchaseIapProduct}
           onClose={() => setActiveDestination('home')}
         />
       )}
